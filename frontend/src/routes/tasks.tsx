@@ -1,0 +1,3 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { TasksPage } from "@/components/sutra/pages";
+export const Route = createFileRoute("/tasks")({ head: () => ({ meta: [{ title: "Task History — SUTRA" }, { name: "description", content: "Track every task SUTRA has executed, interrupted, or rejected as stale." }, { property: "og:title", content: "SUTRA Task History" }, { property: "og:description", content: "Review live and completed voice-agent tasks." }, { property: "og:type", content: "website" }, { name: "twitter:card", content: "summary_large_image" }] }), component: TasksPage });

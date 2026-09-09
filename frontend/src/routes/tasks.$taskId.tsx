@@ -1,0 +1,4 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { TaskDetailPage } from "@/components/sutra/pages";
+export const Route = createFileRoute("/tasks/$taskId")({ head: () => ({ meta: [{ title: "Task Details — SUTRA" }, { name: "description", content: "Inspect a SUTRA task request, timeline, state version, and latency." }, { property: "og:title", content: "SUTRA Task Details" }, { property: "og:description", content: "Inspect a complete voice-agent execution timeline." }, { property: "og:type", content: "website" }, { name: "twitter:card", content: "summary_large_image" }] }), component: Detail });
+function Detail() { const { taskId } = Route.useParams(); return <TaskDetailPage taskId={taskId} />; }

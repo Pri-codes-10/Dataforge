@@ -1,0 +1,4 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { ConversationDetailPage } from "@/components/sutra/pages";
+export const Route = createFileRoute("/conversations/$conversationId")({ head: () => ({ meta: [{ title: "Conversation — SUTRA" }, { name: "description", content: "Review a SUTRA conversation and its current multilingual task state." }, { property: "og:title", content: "SUTRA Conversation" }, { property: "og:description", content: "A continuous multilingual voice conversation." }, { property: "og:type", content: "website" }, { name: "twitter:card", content: "summary_large_image" }] }), component: Detail });
+function Detail() { const { conversationId } = Route.useParams(); return <ConversationDetailPage conversationId={conversationId} />; }

@@ -1,0 +1,3 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { SettingsPage } from "@/components/sutra/pages";
+export const Route = createFileRoute("/settings")({ head: () => ({ meta: [{ title: "Settings — SUTRA" }, { name: "description", content: "Configure SUTRA voice, languages, conversation memory, tasks, and appearance." }, { property: "og:title", content: "SUTRA Settings" }, { property: "og:description", content: "Configure how SUTRA understands and responds." }, { property: "og:type", content: "website" }, { name: "twitter:card", content: "summary_large_image" }] }), component: SettingsPage });

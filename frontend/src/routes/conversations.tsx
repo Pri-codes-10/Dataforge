@@ -1,0 +1,3 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { ConversationsPage } from "@/components/sutra/pages";
+export const Route = createFileRoute("/conversations")({ head: () => ({ meta: [{ title: "Conversations — SUTRA" }, { name: "description", content: "Continue multilingual SUTRA conversations with their full task state." }, { property: "og:title", content: "SUTRA Conversations" }, { property: "og:description", content: "Continue where you left off with full conversational context." }, { property: "og:type", content: "website" }, { name: "twitter:card", content: "summary_large_image" }] }), component: ConversationsPage });
