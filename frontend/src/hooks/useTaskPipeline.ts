@@ -2,25 +2,29 @@
  * useTaskPipeline Hook
  *
  * Custom React hook for the Task Pipeline panel on the dashboard.
- * Consumes `taskService` exclusively.
+ * Subscribes to live pipeline events, state updates, and Rime synthesis
+ * from the backend WebSocket, falling back to taskService.
  */
 
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   getTaskPipelineSteps,
   getActiveToolExecution,
   getStaleToolExecution,
   getRimeState,
-  cancelTask as cancelTaskService,
-  interruptTask as interruptTaskService,
 } from "@/services/taskService";
-import type { TaskPipelineStep, ActiveToolExecution, RimeState } from "@/types";
+import { voiceManager } from "@/services/voiceService";
+import type { TaskPipelineStep, ActiveToolExecution, RimeState, ConversationState } from "@/types";
 
 export const TASK_PIPELINE_QUERY_KEY = ["taskPipeline"] as const;
 
 export function useTaskPipeline() {
   const [isRunning, setIsRunning] = useState(true);
+  const [liveSteps, setLiveSteps] = useState<TaskPipelineStep[] | null>(null);
+  const [liveRimeStatus, setLiveRimeStatus] = useState<"idle" | "speaking" | "completed">("idle");
+  const [liveActiveTool, setLiveActiveTool] = useState<ActiveToolExecution | null>(null);
+  const [liveConversationState, setLiveConversationState] = useState<Partial<ConversationState> | null>(null);
 
   const stepsQuery = useQuery<TaskPipelineStep[], Error>({
     queryKey: [...TASK_PIPELINE_QUERY_KEY, "steps"],
@@ -42,23 +46,77 @@ export function useTaskPipeline() {
     queryFn: getRimeState,
   });
 
-  const cancelCurrentTask = useCallback(
-    async (taskId?: string) => {
-      setIsRunning(false);
-      await cancelTaskService(taskId ?? "0284");
-    },
-    [],
-  );
+  useEffect(() => {
+    const unsubscribe = voiceManager.subscribe({
+      onPipelineEvent: (ev) => {
+        if (ev.event === "TOOL_STARTED") {
+          setIsRunning(true);
+          setLiveActiveTool({
+            toolName: ev.label || "Flight Search API",
+            requestId: ev.requestId || "req_0284",
+            elapsedSeconds: 2.8,
+            isCurrent: true,
+          });
+        } else if (ev.event === "TOOL_COMPLETED") {
+          // Tool complete
+        } else if (ev.event === "CANCELLED") {
+          setIsRunning(false);
+        } else if (ev.event === "RIME_STARTED") {
+          setLiveRimeStatus("speaking");
+        } else if (ev.event === "RIME_COMPLETED") {
+          setLiveRimeStatus("completed");
+        }
 
-  const interruptCurrentTask = useCallback(async () => {
-    await interruptTaskService();
+        // Dynamically update steps matching the event
+        setLiveSteps((prevSteps) => {
+          const base = prevSteps ?? stepsQuery.data ?? [];
+          return base.map((s) => {
+            if (
+              (ev.event === "REQUEST_RECEIVED" && s.id === "1") ||
+              (ev.event === "LANGUAGE_DETECTED" && s.id === "2") ||
+              (ev.event === "INTENT_EXTRACTED" && s.id === "3") ||
+              (ev.event === "TOOL_STARTED" && s.id === "4") ||
+              (ev.event === "STATE_UPDATED" && s.id === "5")
+            ) {
+              return { ...s, status: ev.status === "running" ? "running" : "completed" };
+            }
+            return s;
+          });
+        });
+      },
+      onConversationState: (state) => {
+        setLiveConversationState(state);
+      },
+      onRimeAudioStatus: (status) => {
+        setLiveRimeStatus(status);
+      },
+    });
+
+    return () => unsubscribe();
+  }, [stepsQuery.data]);
+
+  const cancelCurrentTask = useCallback(async () => {
+    setIsRunning(false);
+    voiceManager.cancelTask();
   }, []);
 
+  const interruptCurrentTask = useCallback(async () => {
+    voiceManager.sendInterruption();
+  }, []);
+
+  const steps = liveSteps ?? stepsQuery.data ?? [];
+  const activeTool = liveActiveTool ?? activeToolQuery.data;
+  const staleExecution = staleQuery.data;
+  const rimeState: RimeState = {
+    status: liveRimeStatus ?? rimeQuery.data?.status ?? "idle",
+  };
+
   return {
-    steps: stepsQuery.data ?? [],
-    activeTool: activeToolQuery.data,
-    staleExecution: staleQuery.data,
-    rimeState: rimeQuery.data,
+    steps,
+    activeTool,
+    staleExecution,
+    rimeState,
+    conversationState: liveConversationState,
     isRunning,
     cancelTask: cancelCurrentTask,
     interruptTask: interruptCurrentTask,

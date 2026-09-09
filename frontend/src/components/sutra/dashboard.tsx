@@ -103,7 +103,7 @@ export function LanguagePanel() {
 // ---------------------------------------------------------------------------
 
 export function TaskPipeline() {
-  const { steps, rimeState, isRunning, cancelTask, interruptTask } = useTaskPipeline();
+  const { steps, activeTool, staleExecution, rimeState, isRunning, cancelTask, interruptTask } = useTaskPipeline();
   const rimeStatus = rimeState?.status ?? "idle";
 
   return (
@@ -150,10 +150,10 @@ export function TaskPipeline() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-[10px] font-extrabold uppercase text-orange">
-              Request #0284 · Current
+              {activeTool?.requestId ? `Request #${activeTool.requestId}` : "Request #0284"} · {activeTool?.isCurrent ? "Current" : "Current"}
             </p>
             <p className="mt-1 text-xs font-bold">
-              Flight Search API{" "}
+              {activeTool?.toolName || "Flight Search API"}{" "}
               <span className="font-normal text-muted-foreground">· 2.8s</span>
             </p>
           </div>
@@ -168,7 +168,7 @@ export function TaskPipeline() {
             variant="soft"
             size="sm"
             className="text-destructive"
-            onClick={() => cancelTask("0284")}
+            onClick={() => cancelTask()}
           >
             <Square />
             Cancel task
@@ -180,7 +180,7 @@ export function TaskPipeline() {
       <div className="mt-2 rounded-xl border border-border bg-muted/45 p-3">
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-extrabold uppercase text-muted-foreground">
-            Request #0283 · Stale
+            {staleExecution?.requestId ? `Request #${staleExecution.requestId}` : "Request #0283"} · Stale
           </span>
           <X className="size-4 text-destructive" />
         </div>
@@ -206,7 +206,19 @@ export function TaskPipeline() {
 // ---------------------------------------------------------------------------
 
 export function Dashboard() {
-  const { voiceState, label, cycleNextState, setState } = useVoiceSession();
+  const {
+    voiceState,
+    label,
+    isRecording,
+    permissionDenied,
+    errorMessage,
+    lastTranscript,
+    lastResponse,
+    cycleNextState,
+    setState,
+    toggleRecording,
+    stop,
+  } = useVoiceSession();
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
@@ -232,27 +244,52 @@ export function Dashboard() {
           <h2 className="mt-8 text-center text-3xl font-extrabold">How can I Help You?</h2>
           <p className="mt-2 text-sm font-bold text-primary">{label}</p>
 
+          {/* Real Speech Transcription Display */}
+          {lastTranscript && (
+            <div className="mt-3 max-w-md rounded-xl bg-cyan-soft px-4 py-2 text-center text-xs font-semibold text-cyan">
+              "{lastTranscript}"
+            </div>
+          )}
+          {lastResponse && (
+            <div className="mt-2 max-w-md rounded-xl bg-card border border-border px-4 py-2 text-center text-xs text-foreground">
+              {lastResponse}
+            </div>
+          )}
+
+          {/* Permission warning */}
+          {permissionDenied && (
+            <div className="mt-3 max-w-md rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-2.5 text-center text-xs font-semibold text-destructive">
+              Microphone access is required. Please allow microphone access in your browser settings.
+            </div>
+          )}
+          {errorMessage && !permissionDenied && (
+            <div className="mt-3 max-w-md rounded-xl border border-orange/40 bg-orange/10 px-4 py-2 text-center text-xs font-semibold text-orange">
+              {errorMessage}
+            </div>
+          )}
+
           {/* Microphone controls */}
           <div className="mt-5 flex items-center gap-3 rounded-full border border-border bg-card/80 p-2">
             <Button
               variant="purple"
               size="round"
-              onClick={cycleNextState}
-              aria-label="Change voice state"
+              onClick={toggleRecording}
+              aria-label={isRecording ? "Stop recording and send" : "Start recording"}
+              className={cn(isRecording && "ring-4 ring-primary/40")}
             >
-              <Mic2 className="size-5" />
+              <Mic2 className={cn("size-5", isRecording && "animate-pulse text-destructive")} />
             </Button>
             <Button
               variant="soft"
               size="round"
-              onClick={() => setState("IDLE")}
+              onClick={stop}
               aria-label="Stop voice session"
             >
               <Square />
             </Button>
           </div>
 
-          {/* Demo state selector — driven by useVoiceSession */}
+          {/* Demo state selector */}
           <div className="mt-6 flex flex-wrap justify-center gap-2">
             {demoVoiceStates.map((s) => (
               <button

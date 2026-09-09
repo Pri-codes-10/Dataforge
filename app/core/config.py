@@ -1,50 +1,69 @@
 import os
-
 from dotenv import load_dotenv
 
+base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Initial load from all candidate locations
+load_dotenv(os.path.join(base_dir, ".env"))
+load_dotenv(os.path.join(base_dir, "backend", ".env"))
 load_dotenv()
 
 
 class Settings:
     """
-    Application configuration loaded from environment variables.
+    Application configuration dynamically loaded from environment variables.
+    Properties ensure any updates to .env are immediately reflected without stale cache.
     """
 
-    SARVAM_API_KEY: str = os.getenv(
-        "SARVAM_API_KEY",
-        "",
-    )
+    def reload(self) -> None:
+        """Reload environment variables from .env files."""
+        load_dotenv(os.path.join(base_dir, ".env"), override=True)
+        load_dotenv(os.path.join(base_dir, "backend", ".env"), override=True)
+        load_dotenv(override=True)
 
-    SARVAM_API_URL: str = os.getenv(
-        "SARVAM_API_URL",
-        "https://api.sarvam.ai/v1/chat/completions",
-    )
+    @property
+    def SARVAM_API_KEY(self) -> str:
+        key = os.getenv("SARVAM_API_KEY", "").strip()
+        if not key:
+            self.reload()
+            key = os.getenv("SARVAM_API_KEY", "").strip()
+        return key
 
-    SARVAM_MODEL: str = os.getenv(
-        "SARVAM_MODEL",
-        "sarvam-105b-conversations",
-    )
+    @property
+    def SARVAM_API_URL(self) -> str:
+        return os.getenv("SARVAM_API_URL", "https://api.sarvam.ai/v1/chat/completions").strip()
 
-    RIME_API_KEY: str = os.getenv(
-        "RIME_API_KEY",
-        "",
-    )
+    @property
+    def SARVAM_MODEL(self) -> str:
+        return os.getenv("SARVAM_MODEL", "sarvam-105b-conversations").strip()
 
-    REDIS_URL: str = os.getenv(
-        "REDIS_URL",
-        "redis://localhost:6379",
-    )
+    @property
+    def SARVAM_STT_URL(self) -> str:
+        return os.getenv("SARVAM_STT_URL", "https://api.sarvam.ai/speech-to-text").strip()
 
-    APP_ENV: str = os.getenv(
-        "APP_ENV",
-        "development",
-    )
+    @property
+    def RIME_API_KEY(self) -> str:
+        key = os.getenv("RIME_API_KEY", "").strip()
+        if not key:
+            self.reload()
+            key = os.getenv("RIME_API_KEY", "").strip()
+        return key
 
-    DEBUG: bool = os.getenv(
-        "DEBUG",
-        "true",
-    ).lower() == "true"
+    @property
+    def RIME_VOICE(self) -> str:
+        return os.getenv("RIME_VOICE", "astra").strip()
+
+    @property
+    def REDIS_URL(self) -> str:
+        return os.getenv("REDIS_URL", "redis://localhost:6379").strip()
+
+    @property
+    def APP_ENV(self) -> str:
+        return os.getenv("APP_ENV", "development").strip()
+
+    @property
+    def DEBUG(self) -> bool:
+        return os.getenv("DEBUG", "true").lower().strip() == "true"
 
 
 settings = Settings()

@@ -16,21 +16,19 @@ class VoiceAgent:
     """
 
     def __init__(self):
-        if not settings.SARVAM_API_KEY:
-            raise ValueError(
-                "SARVAM_API_KEY is not configured."
-            )
-
-        self.client = httpx.AsyncClient(
-            headers={
-                "Authorization": f"Bearer {settings.SARVAM_API_KEY}",
-                "api-subscription-key": settings.SARVAM_API_KEY,
-                "Content-Type": "application/json",
-            },
-        )
-
+        self.api_key = settings.SARVAM_API_KEY
         self.api_url = settings.SARVAM_API_URL
         self.model = settings.SARVAM_MODEL
+        self.client = None
+
+        if self.api_key:
+            self.client = httpx.AsyncClient(
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "api-subscription-key": self.api_key,
+                    "Content-Type": "application/json",
+                },
+            )
 
     async def respond(
         self,
@@ -52,6 +50,29 @@ class VoiceAgent:
             language=language,
             is_code_switched=(language == "mixed"),
         )
+
+        api_key = settings.SARVAM_API_KEY or self.api_key
+
+        if not api_key:
+            assistant_text = (
+                f"I heard you: '{user_text}'. Note: Please set SARVAM_API_KEY in your .env file."
+            )
+            conversation_state.add_message(
+                role="assistant",
+                content=assistant_text,
+            )
+            return assistant_text
+
+        if not self.client or self.api_key != api_key:
+            self.api_key = api_key
+            self.client = httpx.AsyncClient(
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "api-subscription-key": self.api_key,
+                    "Content-Type": "application/json",
+                },
+            )
+
 
         messages = [
             {

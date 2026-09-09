@@ -21,6 +21,7 @@
 export type VoiceState =
   | "IDLE"
   | "LISTENING"
+  | "RECORDING"
   | "TRANSCRIBING"
   | "THINKING"
   | "TOOL_RUNNING"

@@ -1,8 +1,18 @@
+# Environment files
 .env
+*.env
+*.env.local
+.env.*
+!.env.example
+!*.env.example
+
+# Python
 __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
 venv/
+
+# IDE
 .vscode/
 .idea/
