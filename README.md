@@ -17,7 +17,7 @@ The application integrates a modern React frontend with a FastAPI backend, Sarva
 ## Core Features
 
 - **Browser Microphone Audio Capture:** Real microphone capture via browser `navigator.mediaDevices.getUserMedia` and `MediaRecorder`.
-- **Server-Side Multilingual STT:** Powered by Sarvam AI Saarika (`saarika:v2.5`), converting Hindi, English, Bengali, and code-mixed Hinglish into text.
+- **Server-Side Multilingual STT:** Powered by Sarvam AI (`saaras:v3` with fallback to `saarika:v2.5`), converting Hindi, English, Bengali, and code-mixed Hinglish into text.
 - **Multilingual & Code-Switching Detection:** Detects script, vocabulary, and code-switching dynamically without requiring the user to pre-select a language.
 - **Continuous Conversation State:** Retains session intent, entities, constraints, and versioning across multiple conversation turns.
 - **Real-Time Task Pipeline:** Tracks request reception, intent extraction, tool execution, and response synthesis over WebSocket.
@@ -154,8 +154,8 @@ To prevent outdated results from corrupting the conversation:
 ## Rime Voice Output
 
 - Implemented in `app/voice/rime.py`.
-- Uses Rime's `arcana` model with sampling rate `22050`.
-- Voice can be configured via `RIME_VOICE` in `.env` (default: `"aria"`).
+- Uses Rime's `coda` model with 22050Hz output, automatically packaged as standard WAV for seamless browser playback.
+- Voice can be configured via `RIME_VOICE` in `.env` (default: `"astra"`).
 - Synthesized audio is base64-encoded and sent over WebSocket as `rime_audio` events for client playback.
 
 ---
@@ -200,10 +200,10 @@ Sutra-VoiceAI/
 
 ## Environment Variables
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root (`o:\Sutra-VoiceAI\.env` or copy `.env.example`):
 
 ```env
-# Sarvam AI Credentials (for LLM and STT)
+# Sarvam AI Credentials (for STT and LLM)
 SARVAM_API_KEY=your_sarvam_api_key
 SARVAM_API_URL=https://api.sarvam.ai/v1/chat/completions
 SARVAM_MODEL=sarvam-105b-conversations
@@ -211,52 +211,93 @@ SARVAM_STT_URL=https://api.sarvam.ai/speech-to-text
 
 # Rime TTS Credentials
 RIME_API_KEY=your_rime_api_key
-RIME_VOICE=aria
+RIME_VOICE=astra
 
 # Application Settings
 APP_ENV=development
 DEBUG=true
 ```
 
-In `frontend/.env` (optional, defaults to `http://localhost:8000`):
+In `frontend/.env.local` (preconfigured to point to backend):
 ```env
 VITE_API_URL=http://localhost:8000
+VITE_WS_URL=ws://localhost:8000/ws/voice
 ```
 
 ---
 
 ## Running Locally
 
-### 1. Start the Backend
+To run the complete SUTRA system, open **two separate terminal windows**:
 
-```bash
-# Install Python dependencies
-pip install -r requirements.txt
+### Terminal 1: Backend Server (FastAPI + Uvicorn)
 
-# Start FastAPI server on port 8000
-python -m uvicorn app.main:app --port 8000 --host 127.0.0.1
-```
+1. **Open a terminal** and navigate to the project root directory:
+   ```bash
+   cd Sutra-VoiceAI
+   ```
 
-Backend will be available at:
-- REST API: `http://localhost:8000`
-- Health check: `http://localhost:8000/health`
-- WebSocket: `ws://localhost:8000/ws/voice`
+2. **(Optional) Create and activate a virtual environment:**
+   ```bash
+   # Windows (PowerShell)
+   python -m venv venv
+   .\venv\Scripts\Activate.ps1
 
-### 2. Start the Frontend
+   # macOS / Linux
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
 
-```bash
+3. **Install Python dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Start the FastAPI backend with auto-reload:**
+   ```bash
+   uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+   ```
+
+   *The backend will be running at:*
+   - **REST API:** `http://127.0.0.1:8000`
+   - **Health Check:** `http://127.0.0.1:8000/health`
+   - **Voice WebSocket:** `ws://127.0.0.1:8000/ws/voice`
+
+---
+
+### Terminal 2: Frontend Application (React + Vite)
+
+1. **Open a second terminal** and navigate to the `frontend` directory:
+   ```bash
 # Navigate to frontend
 cd frontend
 
-# Install dependencies
-npm install
+2. **Install Node.js dependencies:**
+   ```bash
+   npm install
+   ```
 
-# Start Vite development server
-npm run dev
-```
+3. **Start the Vite development server:**
+   ```bash
+   npm run dev
+   ```
 
-Frontend will be available at:
-- `http://localhost:8080`
+   *The frontend will be available at:*
+   - **UI Dashboard:** `http://localhost:8080`
+
+---
+
+### Testing the Integration
+
+1. Open your browser and go to `http://localhost:8080`.
+2. Ensure the top status indicates the backend is connected.
+3. Click the **Microphone** button and grant microphone permissions when prompted.
+4. Speak in English, Hindi, or Hinglish (e.g., *"Mujhe Mumbai jaana hai kal"* or *"Book a flight to Delhi"*).
+5. Watch the live pipeline:
+   - **Transcript:** Displays real-time spoken text transcribed by Sarvam AI.
+   - **Language Detection:** Detects script, primary language (`EN`, `HI`), and code-switching status.
+   - **State & Pipeline:** Updates entities, intent, and constraints in the dashboard.
+   - **Rime Voice Output:** Plays synthesized audio response directly in the browser while the Voice Orb transitions to `SPEAKING`.
 
 ---
 
