@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+websockets
+python-dotenv
+pydantic
+httpx
+
+deepgram-sdk>=7.0.0,<8.0.0
+pytest
+redis
