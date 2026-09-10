@@ -1,0 +1,7 @@
+[
+  {"origin":"Kolkata","destination":"Delhi","date":"Saturday","price":5400,"nonstop":true},
+  {"origin":"Kolkata","destination":"Delhi","date":"Saturday","price":4700,"nonstop":false},
+  {"origin":"Kolkata","destination":"Delhi","date":"Sunday","price":6200,"nonstop":true},
+  {"origin":"Kolkata","destination":"Mumbai","date":"Saturday","price":5800,"nonstop":true},
+  {"origin":"Kolkata","destination":"Mumbai","date":"Sunday","price":5100,"nonstop":false}
+]

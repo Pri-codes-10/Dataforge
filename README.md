@@ -322,3 +322,8 @@ npm run build
 ## License
 
 MIT
+
+
+## Gemini / LiveKit voice-agent prototype
+
+See [model/voice_agent](model/voice_agent/README.md) for the independent Gemini, Deepgram and Rime conversation-continuity prototype and its [setup guide](model/voice_agent/LIVE_SETUP.md). It has a separate Python environment and is not yet connected to this application's frontend.

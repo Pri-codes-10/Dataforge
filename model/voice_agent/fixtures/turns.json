@@ -1,0 +1,5 @@
+[
+  {"text":"Delhi ke liye Saturday flight dekho", "action":{"kind":"call_tool","tool":"search","changes":{"destination":"Delhi","date":"Saturday"},"text":"Checking Saturday flights to Delhi."}},
+  {"text":"Budget chhe hazaar se kam rakhna", "action":{"kind":"call_tool","tool":"search","changes":{"max_price":6000},"text":"Theek hai, keeping the budget under six thousand."}},
+  {"text":"Any update?", "action":{"kind":"respond","text":"The latest search is still running."}}
+]
