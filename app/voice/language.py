@@ -61,10 +61,10 @@ class LanguageService:
     def detect(self, text: str, stt_lang_code: str = "") -> LanguageResult:
         if not text or not text.strip():
             return LanguageResult(
-                primary_language="en",
+                primary_language="unknown",
                 is_code_switched=False,
-                languages=["English"],
-                label="English",
+                languages=["Unknown"],
+                label="Unknown",
             )
 
         text = text.strip()

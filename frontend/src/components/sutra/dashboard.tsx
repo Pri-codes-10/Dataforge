@@ -219,6 +219,7 @@ export function Dashboard() {
     voiceState,
     label,
     isRecording,
+    isSessionActive,
     permissionDenied,
     errorMessage,
     lastTranscript,
@@ -292,25 +293,33 @@ export function Dashboard() {
             </div>
           )}
 
-          {/* Microphone controls */}
-          <div className="mt-5 flex items-center gap-3 rounded-full border border-border bg-card/80 p-2">
+          {/* Hands-free Microphone & Conversation Controls */}
+          <div className="mt-5 flex items-center gap-3 rounded-full border border-border bg-card/80 p-2 shadow-lg">
             <Button
               variant="purple"
-              size="round"
+              size={isSessionActive ? "round" : "default"}
               onClick={toggleRecording}
-              aria-label={isRecording ? "Stop recording and send" : "Start recording"}
-              className={cn(isRecording && "ring-4 ring-primary/40")}
+              aria-label={isSessionActive ? "End conversation session" : "Start hands-free conversation"}
+              className={cn(
+                "font-bold transition-all",
+                isSessionActive ? "ring-4 ring-primary/40" : "px-6 py-2.5 rounded-full"
+              )}
             >
-              <Mic className={cn("size-5", isRecording && "animate-pulse text-destructive")} />
+              <Mic className={cn("size-5 mr-1.5", isRecording && "animate-pulse text-destructive")} />
+              {!isSessionActive && <span>Start Conversation</span>}
             </Button>
-            <Button
-              variant="soft"
-              size="round"
-              onClick={stop}
-              aria-label="Stop voice session"
-            >
-              <Square />
-            </Button>
+            {isSessionActive && (
+              <Button
+                variant="soft"
+                size="round"
+                onClick={stop}
+                title="End Conversation"
+                aria-label="End conversation session"
+                className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              >
+                <Square className="size-4" />
+              </Button>
+            )}
           </div>
 
           {/* Demo state selector */}

@@ -134,88 +134,124 @@ async def voice_websocket(websocket: WebSocket):
         """
         nonlocal active_task_info, last_stale_info
 
-        tool_name = "search_flights" if conversation_state.intent == "flight_search" else "search_hotels" if conversation_state.intent == "hotel_search" else "search_information"
-        tool_label = "Flight Search API" if conversation_state.intent == "flight_search" else "Hotel Search API" if conversation_state.intent == "hotel_search" else "Search API"
-
-        active_task_info = {
-            "requestId": task_id,
-            "toolName": tool_label,
-            "taskVersion": task_version,
-            "isCurrent": True,
-            "elapsedSeconds": 0.0,
-        }
-
-        # Step 2: Tool execution starts
-        await safe_send({
-            "type": "tool_event",
-            "event": "TOOL_STARTED",
-            "tool": tool_name,
-            "toolName": tool_label,
-            "requestId": task_id,
-            "taskVersion": task_version,
-            "label": f"{tool_label} ({task_id})",
-            "status": "running",
-            "isCurrent": True,
-        })
-        await send_pipeline(tool_status="running")
-
-        # Execute tool
-        tool_args = {
-            "origin": conversation_state.constraints.get("origin", "Kolkata"),
-            "destination": conversation_state.constraints.get("destination", "Delhi"),
-            "date": conversation_state.constraints.get("date", "tomorrow"),
-            "max_price": conversation_state.constraints.get("budget") or conversation_state.constraints.get("max_price", ""),
-            "city": conversation_state.constraints.get("origin") or conversation_state.constraints.get("destination", "Kolkata"),
-            "query": transcript,
-        }
-
-        tool_result = await execute_tool(
-            tool_name=tool_name,
-            arguments=tool_args,
-            task_id=task_id,
-            task_version=task_version,
+        # Determine if a tool is required
+        t_lower = transcript.lower()
+        requires_flight = (
+            conversation_state.intent == "flight_search"
+            or any(w in t_lower for w in ["flight", "flights", "ticket", "udaan", "fly", "plane"])
+        )
+        requires_hotel = (
+            conversation_state.intent == "hotel_search"
+            or any(w in t_lower for w in ["hotel", "hotels", "room", "resort", "stay"])
+        )
+        requires_search = (
+            not requires_flight and not requires_hotel and (
+                any(w in t_lower for w in [
+                    "weather", "temperature", "rain", "forecast", "who is", "what is",
+                    "match", "score", "cricket", "news", "price", "latest",
+                    "capital", "tell me about", "kya hai", "kaun hai", "kaisa hai",
+                    "ki holo", "ki obostha", "khobor", "search", "information"
+                ])
+            )
         )
 
-        # Check for stale result
-        if not conversation_state.is_task_current(task_id, task_version) or tool_result.get("stale"):
-            logger.info(f"[Pipeline] Stale tool result detected for {task_id} (v{task_version})")
-            last_stale_info = {
+        tool_result = {"result": ""}
+
+        if requires_flight:
+            tool_name = "search_flights"
+            tool_label = "Search flights"
+        elif requires_hotel:
+            tool_name = "search_hotels"
+            tool_label = "Checking hotels"
+        elif requires_search:
+            tool_name = "search_information"
+            tool_label = "Searching current weather" if any(w in t_lower for w in ["weather", "rain", "temperature"]) else "Searching web"
+        else:
+            tool_name = None
+            tool_label = None
+
+        if tool_name:
+            active_task_info = {
                 "requestId": task_id,
-                "isCurrent": False,
-                "message": "Stale result rejected",
+                "toolName": tool_label,
+                "taskVersion": task_version,
+                "isCurrent": True,
+                "elapsedSeconds": 0.0,
             }
-            await safe_send({
-                "type": "stale_result",
-                "requestId": task_id,
-                "isCurrent": False,
-                "message": "Stale result rejected",
-            })
-            await safe_send({
-                "type": "pipeline_event",
-                "event": "STALE_RESULT_REJECTED",
-                "requestId": task_id,
-                "label": f"Request #{task_id} stale result rejected",
-                "status": "stale",
-            })
-            # Do not proceed with outdated response
-            return
 
-        if tool_result.get("cancelled"):
-            logger.info(f"[Pipeline] Task {task_id} was cancelled.")
-            return
+            # Step 2: Tool execution starts
+            await safe_send({
+                "type": "tool_event",
+                "event": "TOOL_STARTED",
+                "tool": tool_name,
+                "toolName": tool_label,
+                "requestId": task_id,
+                "taskVersion": task_version,
+                "label": f"{tool_label} ({task_id})",
+                "status": "running",
+                "isCurrent": True,
+            })
+            await send_pipeline(tool_status="running")
 
-        # Tool Completed
-        await safe_send({
-            "type": "tool_event",
-            "event": "TOOL_COMPLETED",
-            "tool": tool_name,
-            "toolName": tool_label,
-            "requestId": task_id,
-            "result": tool_result.get("result", "Operation completed"),
-            "status": "completed",
-            "isCurrent": True,
-        })
-        await send_pipeline(tool_status="completed", response_status="running")
+            # Execute tool
+            tool_args = {
+                "origin": conversation_state.constraints.get("origin", "Kolkata"),
+                "destination": conversation_state.constraints.get("destination", "Delhi"),
+                "date": conversation_state.constraints.get("date", "tomorrow"),
+                "max_price": conversation_state.constraints.get("budget") or conversation_state.constraints.get("max_price", ""),
+                "city": conversation_state.constraints.get("origin") or conversation_state.constraints.get("destination", "Kolkata"),
+                "query": transcript,
+            }
+
+            tool_result = await execute_tool(
+                tool_name=tool_name,
+                arguments=tool_args,
+                task_id=task_id,
+                task_version=task_version,
+            )
+
+            # Check for stale result
+            if not conversation_state.is_task_current(task_id, task_version) or tool_result.get("stale"):
+                logger.info(f"[Pipeline] Stale tool result detected for {task_id} (v{task_version})")
+                last_stale_info = {
+                    "requestId": task_id,
+                    "isCurrent": False,
+                    "message": "Stale result rejected",
+                }
+                await safe_send({
+                    "type": "stale_result",
+                    "requestId": task_id,
+                    "isCurrent": False,
+                    "message": "Stale result rejected",
+                })
+                await safe_send({
+                    "type": "pipeline_event",
+                    "event": "STALE_RESULT_REJECTED",
+                    "requestId": task_id,
+                    "label": f"Request #{task_id} stale result rejected",
+                    "status": "stale",
+                })
+                return
+
+            if tool_result.get("cancelled"):
+                logger.info(f"[Pipeline] Task {task_id} was cancelled.")
+                return
+
+            # Tool Completed
+            await safe_send({
+                "type": "tool_event",
+                "event": "TOOL_COMPLETED",
+                "tool": tool_name,
+                "toolName": tool_label,
+                "requestId": task_id,
+                "result": tool_result.get("result", "Operation completed"),
+                "status": "completed",
+                "isCurrent": True,
+            })
+            await send_pipeline(tool_status="completed", response_status="running")
+        else:
+            # Direct response without tool
+            await send_pipeline(tool_status="completed", response_status="running")
 
         # Step 3: LLM Response Generation
         await safe_send({
@@ -258,7 +294,13 @@ async def voice_websocket(websocket: WebSocket):
             "status": "running",
         })
 
-        rime_lang = "hin" if language_result.primary_language in ["hi", "mixed"] else "eng"
+        if language_result.primary_language in ["hi", "mixed"]:
+            rime_lang = "hin"
+        elif language_result.primary_language in ["bn", "ben"]:
+            rime_lang = "ben"
+        else:
+            rime_lang = "eng"
+
         audio_bytes = await rime_service.synthesize(
             text=agent_response,
             language=rime_lang,

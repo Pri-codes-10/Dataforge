@@ -1,0 +1,172 @@
+{
+  "test1_en": [
+    {
+      "speaker": "celer",
+      "detected_lang": "en-IN",
+      "transcript": "Sure. I found a few hotels in Delhi. Would you like me to show you the cheapest options?",
+      "file": "scratch/audio_tests\\test1_en_celer_coda.wav"
+    },
+    {
+      "speaker": "hawa",
+      "detected_lang": "en-IN",
+      "transcript": "Sure, I found a few hotels in Delhi. Would you like me to show you the cheapest options?",
+      "file": "scratch/audio_tests\\test1_en_hawa_coda.wav"
+    },
+    {
+      "speaker": "leni",
+      "detected_lang": "en-IN",
+      "transcript": "Sure, I found a few hotels in Delhi. Would you like me to show you the cheapest options?",
+      "file": "scratch/audio_tests\\test1_en_leni_coda.wav"
+    },
+    {
+      "speaker": "lyra",
+      "detected_lang": "en-IN",
+      "transcript": "Sure, I found a few hotels in Delhi. Would you like me to show you the cheapest options?",
+      "file": "scratch/audio_tests\\test1_en_lyra_coda.wav"
+    },
+    {
+      "speaker": "nadi",
+      "detected_lang": "en-IN",
+      "transcript": "Sure, I found a few hotels in Delhi. Would you like me to show you the cheapest options?",
+      "file": "scratch/audio_tests\\test1_en_nadi_coda.wav"
+    },
+    {
+      "speaker": "taru",
+      "detected_lang": "en-IN",
+      "transcript": "Sure, I found a few hotels in Delhi. Would you like me to show you the cheapest options?",
+      "file": "scratch/audio_tests\\test1_en_taru_coda.wav"
+    }
+  ],
+  "test2_hi": [
+    {
+      "speaker": "astra",
+      "detected_lang": "hi-IN",
+      "transcript": "ठीक है, मेन दिल्ली माइन होटल्स देख रहा हूँ। आपका बजट कितना है?",
+      "file": "scratch/audio_tests\\test2_hi_astra_coda.wav"
+    },
+    {
+      "speaker": "celer",
+      "detected_lang": "hi-IN",
+      "transcript": "ठीक है, मैं दिल्ली माइन होटल्स डेक रहा हूँ। आपका बजट कितना है?",
+      "file": "scratch/audio_tests\\test2_hi_celer_coda.wav"
+    },
+    {
+      "speaker": "hawa",
+      "detected_lang": "hi-IN",
+      "transcript": "ठीक है, मैं दिल्ली मेन होटल देख रहा हूँ, आपका बजट कितना है?",
+      "file": "scratch/audio_tests\\test2_hi_hawa_coda.wav"
+    },
+    {
+      "speaker": "leni",
+      "detected_lang": "hi-IN",
+      "transcript": "ठीक है, मैं दिल्ली माइन होटल्स देख रहा हूँ। आपका बजट कितना है?",
+      "file": "scratch/audio_tests\\test2_hi_leni_coda.wav"
+    },
+    {
+      "speaker": "lyra",
+      "detected_lang": "en-IN",
+      "transcript": "TK Main Delhi Mine Hotels Deck, Raha Hoon. Aapka budget kitna hai?",
+      "file": "scratch/audio_tests\\test2_hi_lyra_coda.wav"
+    },
+    {
+      "speaker": "nadi",
+      "detected_lang": "hi-IN",
+      "transcript": "ठीक है, मेन दिल्ली माइन होटल्स देख रहा हूँ। ये आपका बजट कितना है?",
+      "file": "scratch/audio_tests\\test2_hi_nadi_coda.wav"
+    },
+    {
+      "speaker": "taru",
+      "detected_lang": "en-IN",
+      "transcript": "ठीक है, मैं दिल्ली माइन होटल्स देख रहा हूँ। आपका बजट कितना है?",
+      "file": "scratch/audio_tests\\test2_hi_taru_coda.wav"
+    }
+  ],
+  "test3_bn": [
+    {
+      "speaker": "astra",
+      "detected_lang": "en-IN",
+      "transcript": "Tikase, Ami de Lite Kayaku, Hotel Kunze, de Khotse.",
+      "file": "scratch/audio_tests\\test3_bn_astra_coda.wav"
+    },
+    {
+      "speaker": "celer",
+      "detected_lang": "bn-IN",
+      "transcript": "ঠিক আছে, আমি দিল্লীতে কেক কোটি হোটেল দেখছি।",
+      "file": "scratch/audio_tests\\test3_bn_celer_coda.wav"
+    },
+    {
+      "speaker": "hawa",
+      "detected_lang": "bn-IN",
+      "transcript": "ঠিক আছে, আমি দিল্লিতে কি একটি হোটেল হোমসে দেখছি দিয়ে।",
+      "file": "scratch/audio_tests\\test3_bn_hawa_coda.wav"
+    },
+    {
+      "speaker": "leni",
+      "detected_lang": "bn-IN",
+      "transcript": "ঠিক আছে, আমি দিল্লিতে গিয়ে একটি হোটেল খুঁজি দেখছি।",
+      "file": "scratch/audio_tests\\test3_bn_leni_coda.wav"
+    },
+    {
+      "speaker": "lyra",
+      "detected_lang": "en-IN",
+      "transcript": "Tik Ate, Ekar Hai, Ami Diloti Futel Hunje Dekhashi.",
+      "file": "scratch/audio_tests\\test3_bn_lyra_coda.wav"
+    },
+    {
+      "speaker": "nadi",
+      "detected_lang": "bn-IN",
+      "transcript": "ঠিক আছে, আমি দিল্লিতে কেই একটি হোটেল খান্জি দেখাচ্ছি।",
+      "file": "scratch/audio_tests\\test3_bn_nadi_coda.wav"
+    },
+    {
+      "speaker": "taru",
+      "detected_lang": "bn-IN",
+      "transcript": "ঠিক আছে, আমি দিল্লীতে কয়েকটি হুটোল খুঁজে দেখছি।",
+      "file": "scratch/audio_tests\\test3_bn_taru_coda.wav"
+    }
+  ],
+  "test4_codeswitch": [
+    {
+      "speaker": "astra",
+      "detected_lang": "en-IN",
+      "transcript": "TK, I'll check hotels in Delhi under ₹3000.",
+      "file": "scratch/audio_tests\\test4_codeswitch_astra_coda.wav"
+    },
+    {
+      "speaker": "celer",
+      "detected_lang": "en-IN",
+      "transcript": "Theek hai. I'll check hotels in Delhi under ₹3000.",
+      "file": "scratch/audio_tests\\test4_codeswitch_celer_coda.wav"
+    },
+    {
+      "speaker": "hawa",
+      "detected_lang": "en-IN",
+      "transcript": "Okay, I'll check hotels in Delhi under ₹3000.",
+      "file": "scratch/audio_tests\\test4_codeswitch_hawa_coda.wav"
+    },
+    {
+      "speaker": "leni",
+      "detected_lang": "en-IN",
+      "transcript": "TK, I'll check hotels in Delhi under ₹3000.",
+      "file": "scratch/audio_tests\\test4_codeswitch_leni_coda.wav"
+    },
+    {
+      "speaker": "lyra",
+      "detected_lang": "en-IN",
+      "transcript": "TK, I'll check hotels in Delhi under ₹3000.",
+      "file": "scratch/audio_tests\\test4_codeswitch_lyra_coda.wav"
+    },
+    {
+      "speaker": "nadi",
+      "detected_lang": "en-IN",
+      "transcript": "Tikai Alcheck Hotels in Delhi under 3000 rupees.",
+      "file": "scratch/audio_tests\\test4_codeswitch_nadi_coda.wav"
+    },
+    {
+      "speaker": "taru",
+      "detected_lang": "en-IN",
+      "transcript": "Take high, I'll check hotels in Delhi under ₹3000.",
+      "file": "scratch/audio_tests\\test4_codeswitch_taru_coda.wav"
+    }
+  ]
+}

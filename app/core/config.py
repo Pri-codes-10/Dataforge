@@ -51,7 +51,15 @@ class Settings:
 
     @property
     def RIME_VOICE(self) -> str:
-        return os.getenv("RIME_VOICE", "astra").strip()
+        return os.getenv("RIME_VOICE", "vespera").strip()
+
+    @property
+    def WEB_SEARCH_API_KEY(self) -> str:
+        return os.getenv("WEB_SEARCH_API_KEY", "").strip()
+
+    @property
+    def FLIGHT_API_KEY(self) -> str:
+        return os.getenv("FLIGHT_API_KEY", "").strip()
 
     @property
     def REDIS_URL(self) -> str:

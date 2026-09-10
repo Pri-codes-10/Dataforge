@@ -1,9 +1,10 @@
 /**
  * Voice Service
  *
- * Manages browser microphone capture (16kHz WAV with MediaRecorder fallback),
- * realtime WebSocket connection to the SUTRA backend, audio streaming,
- * Rime audio playback, dynamic task pipeline updates, and session lifecycle.
+ * Manages browser microphone capture (16kHz WAV), hands-free Voice Activity
+ * Detection (VAD), barge-in interruption, continuous conversation lifecycle,
+ * realtime WebSocket connection to the SUTRA backend, Rime audio playback,
+ * and dynamic task pipeline updates.
  */
 
 import { config } from "@/config";
@@ -26,12 +27,12 @@ export const demoVoiceStates: VoiceState[] = [
 
 export function getVoiceStateLabel(state: VoiceState): string {
   const labels: Record<VoiceState, string> = {
-    IDLE: "Tap microphone to speak",
+    IDLE: "Tap to start conversation",
     LISTENING: "Listening...",
-    RECORDING: "Recording voice (tap to send)...",
-    TRANSCRIBING: "Transcribing with Sarvam...",
+    RECORDING: "Listening to you...",
+    TRANSCRIBING: "Understanding...",
     THINKING: "Thinking...",
-    TOOL_RUNNING: "Executing tool...",
+    TOOL_RUNNING: "Checking...",
     USER_INTERRUPTED: "Interrupted",
     TASK_UPDATED: "Task updated",
     SPEAKING: "SUTRA is speaking...",
@@ -136,21 +137,33 @@ function encodeWavPcm16(samples: Float32Array, sampleRate: number): Blob {
 }
 
 // ---------------------------------------------------------------------------
-// Voice Session Manager
+// Voice Session Manager (Continuous Conversational Agent)
 // ---------------------------------------------------------------------------
 class VoiceSessionManager {
   private ws: WebSocket | null = null;
-  private mediaRecorder: MediaRecorder | null = null;
   private audioStream: MediaStream | null = null;
   private audioContext: AudioContext | null = null;
   private scriptProcessor: ScriptProcessorNode | null = null;
   private mediaStreamSource: MediaStreamAudioSourceNode | null = null;
-  private pcmChunks: Float32Array[] = [];
+  private currentUtteranceChunks: Float32Array[] = [];
   private currentAudio: HTMLAudioElement | null = null;
+  private currentAudioUrl: string | null = null;
   private currentState: VoiceState = "IDLE";
   private handlers: Set<VoiceEventHandlers> = new Set();
   private reconnectTimer: number | null = null;
   private watchdogTimer: number | null = null;
+
+  // Continuous Conversation & VAD Parameters
+  public isConversationActive = false;
+  private silenceDurationMs = 0;
+  private speechDurationMs = 0;
+  private isUserSpeaking = false;
+
+  // Configurable VAD Thresholds
+  public SPEECH_RMS_THRESHOLD = 0.016; // Speech start threshold
+  public BARGE_IN_RMS_THRESHOLD = 0.040; // Barge-in interruption threshold
+  public SILENCE_TIMEOUT_MS = 800; // Sustained silence to end utterance
+  public MIN_SPEECH_DURATION_MS = 280; // Minimum speech to avoid accidental noise
 
   constructor() {
     if (typeof window !== "undefined") {
@@ -181,19 +194,21 @@ class VoiceSessionManager {
     }
   }
 
-  private setWatchdog(timeoutMs = 15000, errorMsg = "Speech processing timed out. Please try again.") {
+  private setWatchdog(timeoutMs = 20000, errorMsg = "Speech processing timed out. Returning to listening.") {
     this.clearWatchdog();
     this.watchdogTimer = window.setTimeout(() => {
       if (this.currentState === "TRANSCRIBING" || this.currentState === "THINKING") {
         console.warn("[VoiceService] Watchdog timeout fired.");
         this.emitError(errorMsg);
+        if (this.isConversationActive) {
+          this.setState("LISTENING");
+        }
       }
     }, timeoutMs);
   }
 
   private emitError(message: string) {
     this.clearWatchdog();
-    this.setState("IDLE");
     this.handlers.forEach((h) => h.onError?.(message));
   }
 
@@ -219,25 +234,22 @@ class VoiceSessionManager {
         }
       };
 
-      this.ws.onclose = () => {
-        this.scheduleReconnect();
-      };
-
       this.ws.onerror = (err) => {
-        console.warn("[VoiceService] WebSocket error:", err);
+        console.error("[VoiceService] WebSocket error:", err);
       };
-    } catch (e) {
-      console.error("[VoiceService] Could not establish WebSocket:", e);
-      this.scheduleReconnect();
-    }
-  }
 
-  private scheduleReconnect() {
-    if (this.reconnectTimer) return;
-    this.reconnectTimer = window.setTimeout(() => {
-      this.reconnectTimer = null;
-      this.connectWebSocket();
-    }, 2500);
+      this.ws.onclose = () => {
+        console.warn("[VoiceService] WebSocket connection closed. Reconnecting...");
+        if (!this.reconnectTimer) {
+          this.reconnectTimer = window.setTimeout(() => {
+            this.reconnectTimer = null;
+            this.connectWebSocket();
+          }, 2000);
+        }
+      };
+    } catch (err) {
+      console.error("[VoiceService] Failed to initialize WebSocket:", err);
+    }
   }
 
   private handleIncomingMessage(message: WsIncomingMessage) {
@@ -248,7 +260,7 @@ class VoiceSessionManager {
           this.handlers.forEach((h) => h.onTranscript?.(message.text!, message.final ?? true));
           if (message.final) {
             this.setState("THINKING");
-            this.setWatchdog(25000, "Agent response timed out. Please try speaking again.");
+            this.setWatchdog(25000, "Agent response timed out.");
           }
         }
         break;
@@ -272,7 +284,7 @@ class VoiceSessionManager {
           this.setState("TOOL_RUNNING");
           this.handlers.forEach((h) =>
             h.onToolEvent?.({
-              toolName: message.toolName || message.tool || "Flight Search API",
+              toolName: message.toolName || message.tool || "Search API",
               requestId: message.requestId || "TASK-0001",
               status: "running",
               isCurrent: message.isCurrent ?? true,
@@ -281,7 +293,7 @@ class VoiceSessionManager {
         } else if (message.event === "TOOL_COMPLETED") {
           this.handlers.forEach((h) =>
             h.onToolEvent?.({
-              toolName: message.toolName || message.tool || "Flight Search API",
+              toolName: message.toolName || message.tool || "Search API",
               requestId: message.requestId || "TASK-0001",
               status: "completed",
               isCurrent: message.isCurrent ?? true,
@@ -352,7 +364,11 @@ class VoiceSessionManager {
         if (message.status === "idle") {
           this.clearWatchdog();
           if (this.currentState !== "SPEAKING" && this.currentState !== "RECORDING") {
-            this.setState("IDLE");
+            if (this.isConversationActive) {
+              this.setState("LISTENING");
+            } else {
+              this.setState("IDLE");
+            }
           }
         }
         break;
@@ -360,6 +376,9 @@ class VoiceSessionManager {
       case "error":
         this.clearWatchdog();
         this.emitError(message.message || "An error occurred on the server.");
+        if (this.isConversationActive) {
+          this.setState("LISTENING");
+        }
         break;
 
       default:
@@ -368,7 +387,8 @@ class VoiceSessionManager {
   }
 
   /**
-   * Decodes base64 audio (WAV) and plays it via HTML5 Audio.
+   * Decodes base64 audio and plays it via HTML5 Audio with Blob URL for zero latency.
+   * On completion, automatically returns state to LISTENING.
    */
   private playRimeAudio(base64Data: string, format = "audio/wav") {
     if (!base64Data) return;
@@ -378,49 +398,95 @@ class VoiceSessionManager {
       this.setState("SPEAKING");
       this.handlers.forEach((h) => h.onRimeAudioStatus?.("speaking"));
 
-      const audioUrl = `data:${format};base64,${base64Data}`;
+      // Binary conversion to Blob
+      const binaryString = window.atob(base64Data);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: format });
+      const audioUrl = URL.createObjectURL(blob);
+      this.currentAudioUrl = audioUrl;
+
       const audio = new Audio(audioUrl);
       this.currentAudio = audio;
 
+      const cleanup = () => {
+        if (this.currentAudioUrl) {
+          URL.revokeObjectURL(this.currentAudioUrl);
+          this.currentAudioUrl = null;
+        }
+      };
+
       audio.onended = () => {
+        cleanup();
         this.currentAudio = null;
-        this.setState("IDLE");
         this.handlers.forEach((h) => h.onRimeAudioStatus?.("completed"));
+        // AUTOMATIC RETURN TO LISTENING
+        if (this.isConversationActive) {
+          this.setState("LISTENING");
+        } else {
+          this.setState("IDLE");
+        }
       };
 
       audio.onerror = (e) => {
+        cleanup();
         console.error("[VoiceService] Audio playback error:", e);
         this.currentAudio = null;
-        this.setState("IDLE");
         this.handlers.forEach((h) => h.onRimeAudioStatus?.("idle"));
+        if (this.isConversationActive) {
+          this.setState("LISTENING");
+        } else {
+          this.setState("IDLE");
+        }
       };
 
       audio.play().catch((err) => {
+        cleanup();
         console.warn("[VoiceService] Autoplay blocked or interrupted:", err);
         this.currentAudio = null;
-        this.setState("IDLE");
         this.handlers.forEach((h) => h.onRimeAudioStatus?.("idle"));
+        if (this.isConversationActive) {
+          this.setState("LISTENING");
+        } else {
+          this.setState("IDLE");
+        }
       });
     } catch (e) {
       console.error("[VoiceService] Failed to play Rime audio:", e);
-      this.setState("IDLE");
+      if (this.isConversationActive) {
+        this.setState("LISTENING");
+      } else {
+        this.setState("IDLE");
+      }
     }
   }
 
-  private stopCurrentAudio() {
+  public stopCurrentAudio() {
     if (this.currentAudio) {
       try {
+        this.currentAudio.onended = null;
+        this.currentAudio.onerror = null;
         this.currentAudio.pause();
         this.currentAudio.currentTime = 0;
+        this.currentAudio.src = "";
       } catch { }
       this.currentAudio = null;
+    }
+    if (this.currentAudioUrl) {
+      try {
+        URL.revokeObjectURL(this.currentAudioUrl);
+      } catch { }
+      this.currentAudioUrl = null;
     }
   }
 
   /**
-   * Requests browser microphone permission and begins capturing audio chunks.
+   * Starts a continuous hands-free voice session with browser VAD.
    */
-  public async startRecording(): Promise<void> {
+  public async startConversation(): Promise<void> {
     if (typeof window === "undefined") return;
 
     this.connectWebSocket();
@@ -428,8 +494,9 @@ class VoiceSessionManager {
     this.clearWatchdog();
 
     if (!navigator.mediaDevices?.getUserMedia) {
-      this.emitError("Microphone recording is not supported in this browser.");
-      throw new Error("Microphone API not supported.");
+      const msg = "Microphone recording is not supported in this browser.";
+      this.emitError(msg);
+      throw new Error(msg);
     }
 
     try {
@@ -443,43 +510,33 @@ class VoiceSessionManager {
         },
       });
 
-      this.pcmChunks = [];
+      this.currentUtteranceChunks = [];
+      this.silenceDurationMs = 0;
+      this.speechDurationMs = 0;
+      this.isUserSpeaking = false;
+      this.isConversationActive = true;
 
-      // Attempt to capture 16kHz PCM via Web Audio API
-      try {
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioCtx) {
-          this.audioContext = new AudioCtx({ sampleRate: 16000 });
-          this.mediaStreamSource = this.audioContext.createMediaStreamSource(this.audioStream);
-          this.scriptProcessor = this.audioContext.createScriptProcessor(4096, 1, 1);
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        this.audioContext = new AudioCtx({ sampleRate: 16000 });
+        this.mediaStreamSource = this.audioContext.createMediaStreamSource(this.audioStream);
+        // 2048 buffer size gives ~128ms per frame at 16kHz for responsive VAD
+        this.scriptProcessor = this.audioContext.createScriptProcessor(2048, 1, 1);
 
-          this.scriptProcessor.onaudioprocess = (e) => {
-            const channelData = e.inputBuffer.getChannelData(0);
-            this.pcmChunks.push(new Float32Array(channelData));
-          };
+        this.scriptProcessor.onaudioprocess = (e) => {
+          if (!this.isConversationActive) return;
 
-          this.mediaStreamSource.connect(this.scriptProcessor);
-          this.scriptProcessor.connect(this.audioContext.destination);
-        }
-      } catch (err) {
-        console.warn("[VoiceService] Web Audio ScriptProcessor fallback to MediaRecorder:", err);
+          const channelData = e.inputBuffer.getChannelData(0);
+          this.processVadAudioFrame(channelData, 128);
+        };
+
+        this.mediaStreamSource.connect(this.scriptProcessor);
+        this.scriptProcessor.connect(this.audioContext.destination);
       }
 
-      // Also set up MediaRecorder fallback
-      try {
-        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? "audio/webm;codecs=opus"
-          : MediaRecorder.isTypeSupported("audio/webm")
-            ? "audio/webm"
-            : "audio/ogg";
-        this.mediaRecorder = new MediaRecorder(this.audioStream, { mimeType });
-        this.mediaRecorder.start(250);
-      } catch (recErr) {
-        console.warn("[VoiceService] MediaRecorder init:", recErr);
-      }
-
-      this.setState("RECORDING");
+      this.setState("LISTENING");
     } catch (err: any) {
+      this.isConversationActive = false;
       console.error("[VoiceService] getUserMedia error:", err);
       if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
         const errorMsg =
@@ -499,19 +556,132 @@ class VoiceSessionManager {
   }
 
   /**
-   * Stops microphone recording, encodes audio to standard WAV (or fallback blob),
-   * and dispatches payload to backend.
+   * Real-time Voice Activity Detection (VAD) with Barge-In and Sustained Silence Detection.
    */
-  public async stopRecording(): Promise<void> {
-    if (this.currentState !== "RECORDING") {
+  private processVadAudioFrame(channelData: Float32Array, frameDurationMs: number) {
+    let sum = 0;
+    for (let i = 0; i < channelData.length; i++) {
+      sum += channelData[i] * channelData[i];
+    }
+    const rms = Math.sqrt(sum / channelData.length);
+
+    // Case 1: Assistant is currently speaking through Rime
+    if (this.currentState === "SPEAKING") {
+      // Check for Barge-In interruption (strong user voice above speaker audio)
+      if (rms > this.BARGE_IN_RMS_THRESHOLD) {
+        console.info("[VoiceService] Barge-in detected! Interruping playback.");
+        this.stopCurrentAudio();
+        this.sendInterruption();
+
+        // Start capturing user's new utterance immediately
+        this.setState("RECORDING");
+        this.isUserSpeaking = true;
+        this.currentUtteranceChunks = [new Float32Array(channelData)];
+        this.speechDurationMs = frameDurationMs;
+        this.silenceDurationMs = 0;
+      }
+      return; // Do not record assistant's own voice
+    }
+
+    // Case 2: Listening state (waiting for user to speak)
+    if (this.currentState === "LISTENING" || (this.currentState === "IDLE" && this.isConversationActive)) {
+      if (rms > this.SPEECH_RMS_THRESHOLD) {
+        // User speech started!
+        this.isUserSpeaking = true;
+        this.setState("RECORDING");
+        this.currentUtteranceChunks = [new Float32Array(channelData)];
+        this.speechDurationMs = frameDurationMs;
+        this.silenceDurationMs = 0;
+      }
+      return;
+    }
+
+    // Case 3: User is actively speaking (RECORDING state)
+    if (this.currentState === "RECORDING") {
+      this.currentUtteranceChunks.push(new Float32Array(channelData));
+
+      if (rms > this.SPEECH_RMS_THRESHOLD) {
+        this.speechDurationMs += frameDurationMs;
+        this.silenceDurationMs = 0;
+      } else {
+        // Quiet frame
+        this.silenceDurationMs += frameDurationMs;
+
+        // Has the user paused long enough to finalize the utterance?
+        if (this.silenceDurationMs >= this.SILENCE_TIMEOUT_MS) {
+          if (this.speechDurationMs >= this.MIN_SPEECH_DURATION_MS) {
+            // Sustained utterance complete! Finalize and send.
+            this.finalizeUtterance();
+          } else {
+            // Noise or brief mic click: discard and return to listening
+            this.currentUtteranceChunks = [];
+            this.isUserSpeaking = false;
+            this.speechDurationMs = 0;
+            this.silenceDurationMs = 0;
+            this.setState("LISTENING");
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Finalizes the captured user speech, packages 16kHz WAV, and sends to backend.
+   */
+  private finalizeUtterance() {
+    if (this.currentUtteranceChunks.length === 0) {
+      this.setState("LISTENING");
       return;
     }
 
     this.setState("TRANSCRIBING");
-    this.setWatchdog(18000, "Transcription timed out. Please try speaking again.");
+    this.setWatchdog(20000, "Understanding timed out. Returning to listening.");
+
+    const totalLen = this.currentUtteranceChunks.reduce((acc, c) => acc + c.length, 0);
+    const merged = new Float32Array(totalLen);
+    let offset = 0;
+    for (const chunk of this.currentUtteranceChunks) {
+      merged.set(chunk, offset);
+      offset += chunk.length;
+    }
+    this.currentUtteranceChunks = [];
+    this.isUserSpeaking = false;
+    this.speechDurationMs = 0;
+    this.silenceDurationMs = 0;
+
+    const audioBlob = encodeWavPcm16(merged, 16000);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64String = (reader.result as string).split(",")[1];
+      if (base64String && this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(
+          JSON.stringify({
+            type: "audio",
+            mimeType: "audio/wav",
+            data: base64String,
+          }),
+        );
+      } else if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        this.emitError("Server connection is offline. Reconnecting...");
+        if (this.isConversationActive) {
+          this.setState("LISTENING");
+        }
+      }
+    };
+    reader.readAsDataURL(audioBlob);
+  }
+
+  /**
+   * Cleanly ends the live conversation session.
+   */
+  public async endConversation(): Promise<void> {
+    this.isConversationActive = false;
+    this.isUserSpeaking = false;
+    this.currentUtteranceChunks = [];
+    this.stopCurrentAudio();
+    this.clearWatchdog();
 
     try {
-      // Disconnect script processor
       if (this.scriptProcessor && this.mediaStreamSource) {
         this.mediaStreamSource.disconnect();
         this.scriptProcessor.disconnect();
@@ -527,67 +697,27 @@ class VoiceSessionManager {
       console.warn("[VoiceService] Closing audioContext:", e);
     }
 
-    // Stop media tracks
     if (this.audioStream) {
       this.audioStream.getTracks().forEach((t) => t.stop());
       this.audioStream = null;
     }
-    if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
-      try {
-        this.mediaRecorder.stop();
-      } catch { }
-      this.mediaRecorder = null;
-    }
 
-    // Package audio
-    let audioBlob: Blob | null = null;
-    if (this.pcmChunks.length > 0) {
-      const totalLen = this.pcmChunks.reduce((acc, c) => acc + c.length, 0);
-      const merged = new Float32Array(totalLen);
-      let offset = 0;
-      for (const chunk of this.pcmChunks) {
-        merged.set(chunk, offset);
-        offset += chunk.length;
-      }
-      this.pcmChunks = [];
-      audioBlob = encodeWavPcm16(merged, 16000);
-    }
-
-    if (!audioBlob || audioBlob.size < 100) {
-      this.clearWatchdog();
-      this.setState("IDLE");
-      return;
-    }
-
-    const mimeType = audioBlob.type || "audio/wav";
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64String = (reader.result as string).split(",")[1];
-      if (base64String && this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(
-          JSON.stringify({
-            type: "audio",
-            mimeType,
-            data: base64String,
-          }),
-        );
-      } else if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        this.emitError("Server connection is offline. Please refresh and try again.");
-      }
-    };
-    reader.readAsDataURL(audioBlob);
+    this.setState("IDLE");
   }
 
   /**
-   * Cancel current task execution.
+   * Reset conversation session and clear task state.
    */
-  public cancelTask() {
+  public resetSession() {
     this.stopCurrentAudio();
     this.clearWatchdog();
+    this.currentUtteranceChunks = [];
+    this.isUserSpeaking = false;
+
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: "cancel" }));
+      this.ws.send(JSON.stringify({ type: "reset" }));
     }
-    this.setState("CANCELLED");
+    this.setState("IDLE");
   }
 
   /**
@@ -603,19 +733,19 @@ class VoiceSessionManager {
   }
 
   /**
-   * Reset conversation session.
+   * Cancel current task execution.
    */
-  public resetSession() {
+  public cancelTask() {
     this.stopCurrentAudio();
     this.clearWatchdog();
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: "reset" }));
+      this.ws.send(JSON.stringify({ type: "cancel" }));
     }
-    this.setState("IDLE");
+    this.setState("CANCELLED");
   }
 
   /**
-   * Send text transcription directly.
+   * Send text directly.
    */
   public sendText(text: string) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -630,16 +760,24 @@ class VoiceSessionManager {
       );
     }
   }
+
+  // Legacy compat aliases
+  public startRecording() {
+    return this.startConversation();
+  }
+  public stopRecording() {
+    return this.endConversation();
+  }
 }
 
 export const voiceManager = new VoiceSessionManager();
 
 export async function startVoiceSession(): Promise<void> {
-  return voiceManager.startRecording();
+  return voiceManager.startConversation();
 }
 
 export async function stopVoiceSession(): Promise<void> {
-  return voiceManager.stopRecording();
+  return voiceManager.endConversation();
 }
 
 export async function sendInterruption(): Promise<void> {

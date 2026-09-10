@@ -1,7 +1,7 @@
 /**
  * useVoiceSession Hook
  *
- * Manages frontend voice session state, real microphone capture,
+ * Manages frontend voice session state, hands-free continuous microphone capture,
  * backend WebSocket events, audio playback, and error reporting.
  */
 
@@ -25,11 +25,13 @@ export function useVoiceSession(initialState: VoiceState = "IDLE") {
   const [lastTranscript, setLastTranscript] = useState<string>("");
   const [lastResponse, setLastResponse] = useState<string>("");
   const [permissionDenied, setPermissionDenied] = useState<boolean>(false);
+  const [isSessionActive, setIsSessionActive] = useState<boolean>(() => voiceManager.isConversationActive);
 
   useEffect(() => {
     const unsubscribe = voiceManager.subscribe({
       onStateChange: (newState) => {
         setVoiceState(newState);
+        setIsSessionActive(voiceManager.isConversationActive);
         if (newState !== "ERROR") {
           setErrorMessage(null);
         }
@@ -75,6 +77,7 @@ export function useVoiceSession(initialState: VoiceState = "IDLE") {
       setPermissionDenied(false);
       setErrorMessage(null);
       await startVoiceSession();
+      setIsSessionActive(true);
     } catch (err: any) {
       if (err?.message?.includes("access is required")) {
         setPermissionDenied(true);
@@ -84,23 +87,26 @@ export function useVoiceSession(initialState: VoiceState = "IDLE") {
 
   const stop = useCallback(async () => {
     await stopVoiceSession();
+    setIsSessionActive(false);
   }, []);
 
   const toggleRecording = useCallback(async () => {
-    if (isRecording) {
+    if (voiceManager.isConversationActive) {
       await stopVoiceSession();
+      setIsSessionActive(false);
     } else {
       try {
         setPermissionDenied(false);
         setErrorMessage(null);
         await startVoiceSession();
+        setIsSessionActive(true);
       } catch (err: any) {
         if (err?.message?.includes("access is required")) {
           setPermissionDenied(true);
         }
       }
     }
-  }, [isRecording]);
+  }, []);
 
   const interrupt = useCallback(async () => {
     await sendInterruption();
@@ -111,6 +117,7 @@ export function useVoiceSession(initialState: VoiceState = "IDLE") {
     label,
     isActive,
     isRecording,
+    isSessionActive,
     errorMessage,
     permissionDenied,
     lastTranscript,
@@ -120,6 +127,8 @@ export function useVoiceSession(initialState: VoiceState = "IDLE") {
     start,
     stop,
     toggleRecording,
+    startConversation: start,
+    endConversation: stop,
     interrupt,
   };
 }
