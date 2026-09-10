@@ -93,17 +93,25 @@ class ConversationState:
         self.constraints[key] = value
         self.task_version += 1
 
-    def start_task(self) -> str:
-        """Start a new task."""
+    def reset(self) -> None:
+        """Reset conversation state for a fresh session."""
+        self.session_id = str(uuid4())
+        self.messages.clear()
+        self.intent = None
+        self.constraints.clear()
+        self.language = "en"
+        self.is_code_switched = False
+        self.active_task_id = None
+        self.task_version = 0
 
-        self.active_task_id = str(uuid4())
+    def start_task(self, custom_id: Optional[str] = None) -> str:
+        """Start a new task with version bump."""
         self.task_version += 1
-
+        self.active_task_id = custom_id or f"TASK-{self.task_version:04d}"
         return self.active_task_id
 
     def cancel_task(self) -> None:
         """Cancel the current task."""
-
         self.active_task_id = None
         self.task_version += 1
 
@@ -116,7 +124,6 @@ class ConversationState:
         Check whether a result belongs to the
         latest version of the task.
         """
-
         return (
             self.active_task_id == task_id
             and self.task_version == task_version

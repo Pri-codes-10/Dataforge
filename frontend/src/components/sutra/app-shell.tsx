@@ -169,7 +169,6 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
       {/* Footer */}
       <div className="mt-auto space-y-3 border-t border-cyan/20 p-4">
-        <ThemeToggle />
         <div className="flex items-center gap-2">
           <div className="grid size-8 place-items-center rounded-full bg-cyan text-xs font-extrabold text-primary-foreground">
             A

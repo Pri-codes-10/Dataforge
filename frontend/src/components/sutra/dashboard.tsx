@@ -1,10 +1,11 @@
-import { Check, Circle, Globe, Mic2, Pause, Square, X, Zap } from "lucide-react";
+import { Check, Circle, Globe, Mic, Pause, RotateCcw, Square, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { VoiceState } from "@/types";
 import { useVoiceSession, demoVoiceStates } from "@/hooks/useVoiceSession";
 import { useLanguageDetection } from "@/hooks/useLanguageDetection";
 import { useTaskPipeline } from "@/hooks/useTaskPipeline";
+import { resetVoiceSession } from "@/services/voiceService";
 
 // ---------------------------------------------------------------------------
 // Voice Orb
@@ -89,7 +90,7 @@ export function LanguagePanel() {
               key={l}
               className="rounded-lg bg-cyan-soft px-2.5 py-1 text-xs font-bold text-cyan"
             >
-              {l === "Hindi" ? "हिन्दी (Hindi)" : l}
+              {l === "Hindi" ? "हिन्दी (Hindi)" : l === "Bengali" ? "বাংলা (Bengali)" : l}
             </span>
           ))}
         </div>
@@ -112,7 +113,7 @@ export function TaskPipeline() {
         <h2 className="font-extrabold">Task Pipeline</h2>
         <span className="flex items-center gap-1.5 text-xs font-bold text-orange">
           <span className="live-pulse size-2 rounded-full bg-orange" />
-          {isRunning ? "Task Running" : "Cancelled"}
+          {isRunning ? "Task Running" : "Idle / Complete"}
         </span>
       </div>
 
@@ -145,47 +146,55 @@ export function TaskPipeline() {
         ))}
       </div>
 
-      {/* Active tool execution */}
-      <div className="mt-4 rounded-xl border border-orange/35 bg-orange/5 p-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-[10px] font-extrabold uppercase text-orange">
-              {activeTool?.requestId ? `Request #${activeTool.requestId}` : "Request #0284"} · {activeTool?.isCurrent ? "Current" : "Current"}
-            </p>
-            <p className="mt-1 text-xs font-bold">
-              {activeTool?.toolName || "Flight Search API"}{" "}
-              <span className="font-normal text-muted-foreground">· 2.8s</span>
-            </p>
+      {/* Active tool execution (displayed dynamically only when active) */}
+      {activeTool && (
+        <div className="mt-4 rounded-xl border border-orange/35 bg-orange/5 p-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[10px] font-extrabold uppercase text-orange">
+                Request #{activeTool.requestId} · {activeTool.isCurrent ? "Current" : "Superseded"}
+              </p>
+              <p className="mt-1 text-xs font-bold">
+                {activeTool.toolName}{" "}
+                <span className="font-normal text-muted-foreground">· {isRunning ? "Running" : "Complete"}</span>
+              </p>
+            </div>
+            <Zap className="size-4 text-orange" />
           </div>
-          <Zap className="size-4 text-orange" />
+          {isRunning && (
+            <div className="mt-2 flex gap-2">
+              <Button variant="soft" size="sm" onClick={() => interruptTask()}>
+                <Pause />
+                Interrupt
+              </Button>
+              <Button
+                variant="soft"
+                size="sm"
+                className="text-destructive"
+                onClick={() => cancelTask()}
+              >
+                <Square />
+                Cancel task
+              </Button>
+            </div>
+          )}
         </div>
-        <div className="mt-2 flex gap-2">
-          <Button variant="soft" size="sm" onClick={() => interruptTask()}>
-            <Pause />
-            Interrupt
-          </Button>
-          <Button
-            variant="soft"
-            size="sm"
-            className="text-destructive"
-            onClick={() => cancelTask()}
-          >
-            <Square />
-            Cancel task
-          </Button>
-        </div>
-      </div>
+      )}
 
-      {/* Stale request */}
-      <div className="mt-2 rounded-xl border border-border bg-muted/45 p-3">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-extrabold uppercase text-muted-foreground">
-            {staleExecution?.requestId ? `Request #${staleExecution.requestId}` : "Request #0283"} · Stale
-          </span>
-          <X className="size-4 text-destructive" />
+      {/* Stale request (displayed only when an actual stale event occurred) */}
+      {staleExecution && (
+        <div className="mt-2 rounded-xl border border-destructive/30 bg-destructive/10 p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-extrabold uppercase text-destructive">
+              Request #{staleExecution.requestId} · Stale
+            </span>
+            <X className="size-4 text-destructive" />
+          </div>
+          <p className="mt-1 text-xs font-bold text-destructive">
+            {staleExecution.message || "Stale result rejected"}
+          </p>
         </div>
-        <p className="mt-1 text-xs font-bold text-destructive">Stale result rejected</p>
-      </div>
+      )}
 
       {/* Rime status */}
       <div className="mt-4 flex items-center justify-between rounded-xl bg-cyan-soft p-3">
@@ -220,38 +229,53 @@ export function Dashboard() {
     stop,
   } = useVoiceSession();
 
+  const { activeLanguages } = useLanguageDetection();
+
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
       {/* Main voice session panel */}
-      <section className="min-h-[660px] rounded-3xl border border-border bg-card/65 p-5 backdrop-blur-md sm:p-8">
+      <section className="min-h-[800px] rounded-3xl border border-border bg-card/65 p-5 backdrop-blur-md sm:p-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-lg font-extrabold">Live session</h1>
-            <div className="mt-1.5 flex items-center gap-1.5">
-              <div className="rounded-lg border border-cyan/30 bg-cyan-soft px-2.5 py-0.5 text-xs font-bold text-cyan">
-                English
-              </div>
-              <span className="text-xs font-bold text-muted-foreground">+</span>
-              <div className="rounded-lg border border-cyan/30 bg-cyan-soft px-2.5 py-0.5 text-xs font-bold text-cyan">
-                Hindi
-              </div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {activeLanguages.map((lang, idx) => (
+                <div key={lang} className="flex items-center gap-1.5">
+                  <div className="rounded-lg border border-cyan/30 bg-cyan-soft px-2.5 py-0.5 text-xs font-bold text-cyan">
+                    {lang === "Hindi" ? "हिन्दी (Hindi)" : lang === "Bengali" ? "বাংলা (Bengali)" : lang}
+                  </div>
+                  {idx < activeLanguages.length - 1 && (
+                    <span className="text-xs font-bold text-muted-foreground">+</span>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
+          <Button
+            variant="soft"
+            size="sm"
+            onClick={() => resetVoiceSession()}
+            title="Reset conversation state"
+            className="text-xs text-muted-foreground"
+          >
+            <RotateCcw className="size-3.5 mr-1" />
+            Reset
+          </Button>
         </div>
 
-        <div className="flex min-h-[520px] flex-col items-center justify-center">
+        <div className="flex min-h-[620px] flex-col items-center justify-center">
           <VoiceOrb state={voiceState} />
           <h2 className="mt-8 text-center text-3xl font-extrabold">How can I Help You?</h2>
           <p className="mt-2 text-sm font-bold text-primary">{label}</p>
 
           {/* Real Speech Transcription Display */}
           {lastTranscript && (
-            <div className="mt-3 max-w-md rounded-xl bg-cyan-soft px-4 py-2 text-center text-xs font-semibold text-cyan">
+            <div className="mt-3 max-w-2xl rounded-xl bg-cyan-soft px-4 py-2 text-center text-lg font-semibold text-cyan">
               "{lastTranscript}"
             </div>
           )}
           {lastResponse && (
-            <div className="mt-2 max-w-md rounded-xl bg-card border border-border px-4 py-2 text-center text-xs text-foreground">
+            <div className="mt-2 max-w-2xl rounded-xl bg-card border border-border px-4 py-2 text-center text-lg text-foreground">
               {lastResponse}
             </div>
           )}
@@ -277,7 +301,7 @@ export function Dashboard() {
               aria-label={isRecording ? "Stop recording and send" : "Start recording"}
               className={cn(isRecording && "ring-4 ring-primary/40")}
             >
-              <Mic2 className={cn("size-5", isRecording && "animate-pulse text-destructive")} />
+              <Mic className={cn("size-5", isRecording && "animate-pulse text-destructive")} />
             </Button>
             <Button
               variant="soft"

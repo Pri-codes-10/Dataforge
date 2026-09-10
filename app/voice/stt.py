@@ -9,7 +9,7 @@ logger = logging.getLogger("sutra.stt")
 
 class STTService:
     """
-    Speech-to-Text Service using Sarvam AI's Saarika model.
+    Speech-to-Text Service using Sarvam AI's Saaras / Saarika model.
 
     Handles:
     - Audio bytes -> Transcription
@@ -18,15 +18,15 @@ class STTService:
     """
 
     def __init__(self):
-        self.on_transcript: Optional[Callable[[str, bool], None]] = None
+        self.on_transcript: Optional[Callable[[str, bool, str], None]] = None
 
     def set_callback(
         self,
-        callback: Callable[[str, bool], None],
+        callback: Callable[[str, bool, str], None],
     ) -> None:
         """
-        Register a callback that receives transcriptions.
-        callback(transcript, is_final)
+        Register a default callback that receives transcriptions.
+        callback(transcript, is_final, language_code)
         """
         self.on_transcript = callback
 
@@ -34,38 +34,43 @@ class STTService:
         self,
         transcript: str,
         is_final: bool = True,
+        lang_code: str = "unknown",
+        callback: Optional[Callable] = None,
     ) -> None:
         """
         Notify listener/WebSocket of a transcription.
         """
-        if not transcript.strip():
-            return
-
-        if self.on_transcript:
-            result = self.on_transcript(
-                transcript,
-                is_final,
-            )
-            if hasattr(result, "__await__"):
-                await result
+        target_cb = callback or self.on_transcript
+        if target_cb:
+            try:
+                result = target_cb(transcript, is_final, lang_code)
+                if hasattr(result, "__await__"):
+                    await result
+            except TypeError:
+                # In case callback only accepts (transcript, is_final)
+                result = target_cb(transcript, is_final)
+                if hasattr(result, "__await__"):
+                    await result
 
     async def send_audio(
         self,
         audio_data: bytes,
         mime_type: str = "audio/webm",
+        callback: Optional[Callable] = None,
     ) -> Tuple[str, str]:
         """
-        Send raw audio bytes to Sarvam STT API (Saarika model) and return
-        (transcript, detected_language).
+        Send raw audio bytes to Sarvam STT API (saaras:v3 model) and return
+        (transcript, detected_language_code).
         """
-        if not audio_data:
+        if not audio_data or len(audio_data) < 100:
+            logger.warning("[STT] Audio payload too small or empty.")
             return "", "unknown"
 
         api_key = settings.SARVAM_API_KEY
         if not api_key:
             logger.warning("SARVAM_API_KEY is not configured in .env. STT call bypassed.")
             placeholder = "Audio received (SARVAM_API_KEY is not configured in backend .env)"
-            await self.process_transcription(placeholder, is_final=True)
+            await self.process_transcription(placeholder, is_final=True, lang_code="unknown", callback=callback)
             return placeholder, "unknown"
 
         stt_url = settings.SARVAM_STT_URL
@@ -122,6 +127,7 @@ class STTService:
                         res_json = response.json()
                         transcript = res_json.get("transcript", "").strip()
                         lang_code = res_json.get("language_code", "unknown")
+                        logger.info(f"[STT Success] Model: {model} -> Transcript: '{transcript}' (lang: {lang_code})")
                         stt_success = True
                         break
 
@@ -138,7 +144,7 @@ class STTService:
         if stt_success:
             if transcript:
                 try:
-                    await self.process_transcription(transcript, is_final=True)
+                    await self.process_transcription(transcript, is_final=True, lang_code=lang_code, callback=callback)
                 except Exception as exc:
                     logger.debug(f"Transcription callback error: {exc}")
                 return transcript, lang_code
@@ -146,12 +152,7 @@ class STTService:
 
         if last_error:
             logger.warning(f"[STT Failure] {last_error}")
-            err_notice = f"[Sarvam STT Error: {last_error}]"
-            try:
-                await self.process_transcription(err_notice, is_final=True)
-            except Exception:
-                pass
-            return err_notice, "unknown"
+            return "", "unknown"
 
         return "", "unknown"
 
@@ -159,7 +160,7 @@ class STTService:
         """
         Close the STT integration.
         """
-        self.on_transcript = None
+        pass
 
 
 stt_service = STTService()
