@@ -3,7 +3,7 @@
  *
  * Custom React hook for the dynamic Task Pipeline panel on the dashboard.
  * Subscribes to live pipeline events, state updates, tool executions,
- * stale result rejections, and Rime synthesis from the backend WebSocket.
+ * stale result rejections, Rime synthesis, and reset events.
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -48,6 +48,7 @@ export function useTaskPipeline() {
           isCurrent: false,
           message: stale.message,
         });
+        setIsRunning(false);
       },
 
       onPipelineEvent: (ev) => {
@@ -67,13 +68,27 @@ export function useTaskPipeline() {
             isCurrent: false,
             message: "Stale result rejected",
           });
-        } else if (ev.event === "CANCELLED") {
           setIsRunning(false);
+        } else if (ev.event === "CANCELLED" || ev.event === "SESSION_RESET") {
+          setIsRunning(false);
+          setActiveTool(null);
+          if (ev.event === "SESSION_RESET") {
+            setStaleExecution(null);
+            setSteps(initialDefaultSteps);
+          }
         } else if (ev.event === "RIME_STARTED") {
           setRimeStatus("speaking");
         } else if (ev.event === "RIME_COMPLETED") {
           setRimeStatus("completed");
         }
+      },
+
+      onResetComplete: () => {
+        setIsRunning(false);
+        setActiveTool(null);
+        setStaleExecution(null);
+        setSteps(initialDefaultSteps);
+        setRimeStatus("idle");
       },
 
       onConversationState: (state) => {

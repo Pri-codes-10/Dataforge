@@ -227,6 +227,7 @@ export function Dashboard() {
     cycleNextState,
     setState,
     toggleRecording,
+    reset,
     stop,
   } = useVoiceSession();
 
@@ -235,7 +236,7 @@ export function Dashboard() {
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
       {/* Main voice session panel */}
-      <section className="min-h-[800px] rounded-3xl border border-border bg-card/65 p-5 backdrop-blur-md sm:p-8">
+      <section className="min-h-[700px] rounded-3xl border border-border bg-card/65 p-5 backdrop-blur-md sm:p-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-lg font-extrabold">Live session</h1>
@@ -255,7 +256,7 @@ export function Dashboard() {
           <Button
             variant="soft"
             size="sm"
-            onClick={() => resetVoiceSession()}
+            onClick={() => reset()}
             title="Reset conversation state"
             className="text-xs text-muted-foreground"
           >
@@ -264,7 +265,7 @@ export function Dashboard() {
           </Button>
         </div>
 
-        <div className="flex min-h-[620px] flex-col items-center justify-center">
+        <div className="flex min-h-[520px] flex-col items-center justify-center">
           <VoiceOrb state={voiceState} />
           <h2 className="mt-8 text-center text-3xl font-extrabold">How can I Help You?</h2>
           <p className="mt-2 text-sm font-bold text-primary">{label}</p>

@@ -3,8 +3,8 @@
  *
  * Manages browser microphone capture (16kHz WAV), hands-free Voice Activity
  * Detection (VAD), barge-in interruption, continuous conversation lifecycle,
- * realtime WebSocket connection to the SUTRA backend, Rime audio playback,
- * and dynamic task pipeline updates.
+ * realtime WebSocket connection to the SUTRA backend with Redis persistence,
+ * Rime audio playback, session restoration, and race-safe Reset cleanup.
  */
 
 import { config } from "@/config";
@@ -73,6 +73,7 @@ export interface VoiceEventHandlers {
     message: string;
   }) => void;
   onConversationState?: (state: Partial<ConversationState>) => void;
+  onResetComplete?: (data: { conversation_id: string; task_version: number }) => void;
   onError?: (errorMessage: string) => void;
   onRimeAudioStatus?: (status: "idle" | "speaking" | "completed") => void;
 }
@@ -97,6 +98,8 @@ interface WsIncomingMessage {
   steps?: TaskPipelineStep[];
   isRunning?: boolean;
   result?: any;
+  conversation_id?: string;
+  task_version?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,7 +140,7 @@ function encodeWavPcm16(samples: Float32Array, sampleRate: number): Blob {
 }
 
 // ---------------------------------------------------------------------------
-// Voice Session Manager (Continuous Conversational Agent)
+// Voice Session Manager (Continuous Conversational Agent with Redis & Reset)
 // ---------------------------------------------------------------------------
 class VoiceSessionManager {
   private ws: WebSocket | null = null;
@@ -152,6 +155,7 @@ class VoiceSessionManager {
   private handlers: Set<VoiceEventHandlers> = new Set();
   private reconnectTimer: number | null = null;
   private watchdogTimer: number | null = null;
+  private conversationId: string = "";
 
   // Continuous Conversation & VAD Parameters
   public isConversationActive = false;
@@ -167,6 +171,33 @@ class VoiceSessionManager {
 
   constructor() {
     if (typeof window !== "undefined") {
+      this.initConversationId();
+      this.connectWebSocket();
+    }
+  }
+
+  /**
+   * Initializes a fresh conversation_id for the session.
+   */
+  public initConversationId(): string {
+    if (typeof window === "undefined") return "";
+    const cid = `conv-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    this.conversationId = cid;
+    return cid;
+  }
+
+  public getConversationId(): string {
+    if (!this.conversationId) {
+      this.initConversationId();
+    }
+    return this.conversationId;
+  }
+
+  public setConversationId(newId: string) {
+    this.conversationId = newId;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "init", conversation_id: newId }));
+    } else {
       this.connectWebSocket();
     }
   }
@@ -219,10 +250,12 @@ class VoiceSessionManager {
     }
 
     try {
-      this.ws = new WebSocket(config.wsUrl);
+      const cid = this.getConversationId();
+      const wsUrlWithCid = `${config.wsUrl}?conversation_id=${encodeURIComponent(cid)}`;
+      this.ws = new WebSocket(wsUrlWithCid);
 
       this.ws.onopen = () => {
-        console.info("[VoiceService] Connected to SUTRA WebSocket at", config.wsUrl);
+        console.info(`[VoiceService] Connected to SUTRA WebSocket for conversation: ${cid}`);
       };
 
       this.ws.onmessage = (event) => {
@@ -337,6 +370,23 @@ class VoiceSessionManager {
         } else if (message.event === "USER_INTERRUPTED") {
           this.clearWatchdog();
           this.setState("USER_INTERRUPTED");
+        } else if (message.event === "SESSION_RESET") {
+          this.clearWatchdog();
+          this.setState("IDLE");
+        }
+        break;
+
+      case "reset_complete":
+        this.clearWatchdog();
+        this.stopCurrentAudio();
+        this.setState("IDLE");
+        if (message.conversation_id && message.task_version !== undefined) {
+          this.handlers.forEach((h) =>
+            h.onResetComplete?.({
+              conversation_id: message.conversation_id!,
+              task_version: message.task_version!,
+            }),
+          );
         }
         break;
 
@@ -387,7 +437,7 @@ class VoiceSessionManager {
   }
 
   /**
-   * Decodes base64 audio and plays it via HTML5 Audio with Blob URL for zero latency.
+   * Decodes base64 audio and plays it via HTML5 Audio with Blob URL.
    * On completion, automatically returns state to LISTENING.
    */
   private playRimeAudio(base64Data: string, format = "audio/wav") {
@@ -398,7 +448,6 @@ class VoiceSessionManager {
       this.setState("SPEAKING");
       this.handlers.forEach((h) => h.onRimeAudioStatus?.("speaking"));
 
-      // Binary conversion to Blob
       const binaryString = window.atob(base64Data);
       const len = binaryString.length;
       const bytes = new Uint8Array(len);
@@ -414,7 +463,9 @@ class VoiceSessionManager {
 
       const cleanup = () => {
         if (this.currentAudioUrl) {
-          URL.revokeObjectURL(this.currentAudioUrl);
+          try {
+            URL.revokeObjectURL(this.currentAudioUrl);
+          } catch { }
           this.currentAudioUrl = null;
         }
       };
@@ -423,7 +474,6 @@ class VoiceSessionManager {
         cleanup();
         this.currentAudio = null;
         this.handlers.forEach((h) => h.onRimeAudioStatus?.("completed"));
-        // AUTOMATIC RETURN TO LISTENING
         if (this.isConversationActive) {
           this.setState("LISTENING");
         } else {
@@ -464,6 +514,9 @@ class VoiceSessionManager {
     }
   }
 
+  /**
+   * Immediately stops and cancels active Rime audio playback (Part 20).
+   */
   public stopCurrentAudio() {
     if (this.currentAudio) {
       try {
@@ -481,6 +534,7 @@ class VoiceSessionManager {
       } catch { }
       this.currentAudioUrl = null;
     }
+    this.handlers.forEach((h) => h.onRimeAudioStatus?.("idle"));
   }
 
   /**
@@ -518,20 +572,26 @@ class VoiceSessionManager {
 
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
-        this.audioContext = new AudioCtx({ sampleRate: 16000 });
+        this.audioContext = new AudioCtx();
+        const sampleRate = this.audioContext.sampleRate || 16000;
+        const bufferSize = 2048;
+        const frameDurationMs = (bufferSize / sampleRate) * 1000;
+
         this.mediaStreamSource = this.audioContext.createMediaStreamSource(this.audioStream);
-        // 2048 buffer size gives ~128ms per frame at 16kHz for responsive VAD
-        this.scriptProcessor = this.audioContext.createScriptProcessor(2048, 1, 1);
+        this.scriptProcessor = this.audioContext.createScriptProcessor(bufferSize, 1, 1);
 
         this.scriptProcessor.onaudioprocess = (e) => {
           if (!this.isConversationActive) return;
-
           const channelData = e.inputBuffer.getChannelData(0);
-          this.processVadAudioFrame(channelData, 128);
+          this.processVadAudioFrame(channelData, frameDurationMs);
         };
 
+        // Zero-gain node ensures microphone audio is NEVER echoed out to speakers
+        const muteGain = this.audioContext.createGain();
+        muteGain.gain.value = 0;
         this.mediaStreamSource.connect(this.scriptProcessor);
-        this.scriptProcessor.connect(this.audioContext.destination);
+        this.scriptProcessor.connect(muteGain);
+        muteGain.connect(this.audioContext.destination);
       }
 
       this.setState("LISTENING");
@@ -565,28 +625,26 @@ class VoiceSessionManager {
     }
     const rms = Math.sqrt(sum / channelData.length);
 
-    // Case 1: Assistant is currently speaking through Rime
+    // Case 1: Assistant is speaking
+    // Prevent assistant audio played through speakers from triggering VAD
     if (this.currentState === "SPEAKING") {
-      // Check for Barge-In interruption (strong user voice above speaker audio)
-      if (rms > this.BARGE_IN_RMS_THRESHOLD) {
-        console.info("[VoiceService] Barge-in detected! Interruping playback.");
+      if (rms > 0.15) {
+        console.info("[VoiceService] Intentional loud barge-in detected! Interrupting playback.");
         this.stopCurrentAudio();
         this.sendInterruption();
 
-        // Start capturing user's new utterance immediately
         this.setState("RECORDING");
         this.isUserSpeaking = true;
         this.currentUtteranceChunks = [new Float32Array(channelData)];
         this.speechDurationMs = frameDurationMs;
         this.silenceDurationMs = 0;
       }
-      return; // Do not record assistant's own voice
+      return;
     }
 
-    // Case 2: Listening state (waiting for user to speak)
+    // Case 2: Listening state
     if (this.currentState === "LISTENING" || (this.currentState === "IDLE" && this.isConversationActive)) {
       if (rms > this.SPEECH_RMS_THRESHOLD) {
-        // User speech started!
         this.isUserSpeaking = true;
         this.setState("RECORDING");
         this.currentUtteranceChunks = [new Float32Array(channelData)];
@@ -596,7 +654,7 @@ class VoiceSessionManager {
       return;
     }
 
-    // Case 3: User is actively speaking (RECORDING state)
+    // Case 3: User speaking (RECORDING)
     if (this.currentState === "RECORDING") {
       this.currentUtteranceChunks.push(new Float32Array(channelData));
 
@@ -604,16 +662,11 @@ class VoiceSessionManager {
         this.speechDurationMs += frameDurationMs;
         this.silenceDurationMs = 0;
       } else {
-        // Quiet frame
         this.silenceDurationMs += frameDurationMs;
-
-        // Has the user paused long enough to finalize the utterance?
         if (this.silenceDurationMs >= this.SILENCE_TIMEOUT_MS) {
           if (this.speechDurationMs >= this.MIN_SPEECH_DURATION_MS) {
-            // Sustained utterance complete! Finalize and send.
             this.finalizeUtterance();
           } else {
-            // Noise or brief mic click: discard and return to listening
             this.currentUtteranceChunks = [];
             this.isUserSpeaking = false;
             this.speechDurationMs = 0;
@@ -626,7 +679,7 @@ class VoiceSessionManager {
   }
 
   /**
-   * Finalizes the captured user speech, packages 16kHz WAV, and sends to backend.
+   * Finalizes captured speech, encodes WAV at AudioContext sample rate, and dispatches to backend.
    */
   private finalizeUtterance() {
     if (this.currentUtteranceChunks.length === 0) {
@@ -649,7 +702,8 @@ class VoiceSessionManager {
     this.speechDurationMs = 0;
     this.silenceDurationMs = 0;
 
-    const audioBlob = encodeWavPcm16(merged, 16000);
+    const sampleRate = this.audioContext?.sampleRate || 16000;
+    const audioBlob = encodeWavPcm16(merged, sampleRate);
     const reader = new FileReader();
     reader.onloadend = () => {
       const base64String = (reader.result as string).split(",")[1];
@@ -672,7 +726,8 @@ class VoiceSessionManager {
   }
 
   /**
-   * Cleanly ends the live conversation session.
+   * Cleanly ends the live conversation session (Phase 2).
+   * Notifies backend to stop active tasks without closing connection.
    */
   public async endConversation(): Promise<void> {
     this.isConversationActive = false;
@@ -680,6 +735,11 @@ class VoiceSessionManager {
     this.currentUtteranceChunks = [];
     this.stopCurrentAudio();
     this.clearWatchdog();
+
+    // Send stop control to backend to cancel any active task
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "stop" }));
+    }
 
     try {
       if (this.scriptProcessor && this.mediaStreamSource) {
@@ -706,17 +766,22 @@ class VoiceSessionManager {
   }
 
   /**
-   * Reset conversation session and clear task state.
+   * Complete, race-safe Reset (Part 9, 20, 21):
+   * - Stops microphone tracks
+   * - Stops Rime audio playback
+   * - Clears VAD and utterance buffers
+   * - Sends reset to backend to invalidate active tasks & reset active state in Redis
+   * - Keeps conversation history intact in Redis
    */
-  public resetSession() {
+  public async resetSession(): Promise<void> {
     this.stopCurrentAudio();
     this.clearWatchdog();
-    this.currentUtteranceChunks = [];
-    this.isUserSpeaking = false;
+    await this.endConversation();
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: "reset" }));
     }
+
     this.setState("IDLE");
   }
 
@@ -745,7 +810,7 @@ class VoiceSessionManager {
   }
 
   /**
-   * Send text directly.
+   * Send text directly to backend.
    */
   public sendText(text: string) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -785,6 +850,6 @@ export async function sendInterruption(): Promise<void> {
   return Promise.resolve();
 }
 
-export function resetVoiceSession(): void {
-  voiceManager.resetSession();
+export async function resetVoiceSession(): Promise<void> {
+  return voiceManager.resetSession();
 }

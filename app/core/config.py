@@ -62,10 +62,6 @@ class Settings:
         return os.getenv("FLIGHT_API_KEY", "").strip()
 
     @property
-    def REDIS_URL(self) -> str:
-        return os.getenv("REDIS_URL", "redis://localhost:6379").strip()
-
-    @property
     def APP_ENV(self) -> str:
         return os.getenv("APP_ENV", "development").strip()
 

@@ -66,7 +66,7 @@ function Brand() {
   return (
     <Link to="/" className="group block px-4 pt-5">
       <div className="relative grid size-20 place-items-center overflow-hidden rounded-3xl border border-cyan/40">
-        <img src={logo} alt="SUTRA Logo" width={100} height={100} className="object-contain" /> 
+        <img src={logo} alt="SUTRA Logo" width={100} height={100} className="object-contain" />
       </div>
       <div className="mt-3 text-xl font-extrabold tracking-tight">SUTRA</div>
       <p className="max-w-44 text-xs leading-snug text-muted-foreground">

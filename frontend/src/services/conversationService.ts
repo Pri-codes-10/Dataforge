@@ -1,87 +1,104 @@
 /**
  * Conversation Service
  *
- * Provides conversation and chat session data to the application.
- * Currently serves data from isolated mock models in `src/data/`.
- *
- * When the backend is ready, replace the mock returns with apiClient calls:
- * e.g. return apiClient.get<Conversation[]>("/conversations");
+ * Provides real Redis-backed conversation and chat session data to the application.
+ * Interacts directly with the FastAPI backend REST API.
  */
 
 import type { Conversation, Message, RecentConversationGroup } from "@/types";
-import { mockConversations } from "@/data/mockConversations";
-import { mockRecentConversations } from "@/data/mockDashboard";
+import { apiClient } from "@/services/apiClient";
+import { voiceManager } from "@/services/voiceService";
 
 /**
- * Returns all conversations for the active user.
- * Future: GET /conversations
+ * Returns all conversations stored in Redis.
  */
 export async function getConversations(): Promise<Conversation[]> {
-  // TODO: Replace with apiClient.get<Conversation[]>("/conversations");
-  return Promise.resolve([...mockConversations]);
+  try {
+    const data = await apiClient.get<Conversation[]>("/api/conversations");
+    return data || [];
+  } catch (err) {
+    console.warn("[ConversationService] Failed to fetch conversations from backend:", err);
+    return [];
+  }
 }
 
 /**
- * Returns a single conversation by ID, or undefined if not found.
- * Future: GET /conversations/:id
+ * Returns a single conversation by ID with its messages and active state.
  */
 export async function getConversation(id: string): Promise<Conversation | undefined> {
-  // TODO: Replace with apiClient.get<Conversation>(`/conversations/${id}`);
-  const item = mockConversations.find((c) => c.id === id);
-  return Promise.resolve(item ? { ...item } : undefined);
+  try {
+    const data = await apiClient.get<Conversation>(`/api/conversations/${encodeURIComponent(id)}`);
+    return data;
+  } catch (err) {
+    console.warn(`[ConversationService] Failed to fetch conversation ${id}:`, err);
+    return undefined;
+  }
 }
 
 /**
  * Returns grouped recent conversation history items for the sidebar.
- * Future: GET /conversations/recent
  */
 export async function getRecentConversations(): Promise<RecentConversationGroup[]> {
-  // TODO: Replace with apiClient.get<RecentConversationGroup[]>("/conversations/recent");
-  return Promise.resolve([...mockRecentConversations]);
+  try {
+    const data = await apiClient.get<RecentConversationGroup[]>("/api/conversations/recent");
+    return data || [];
+  } catch (err) {
+    console.warn("[ConversationService] Failed to fetch recent conversations:", err);
+    return [];
+  }
 }
 
 /**
- * Creates a new conversation session.
- * Future: POST /conversations
+ * Creates a new conversation session in Redis.
  */
 export async function createConversation(title = "New Conversation"): Promise<Conversation> {
-  const newConversation: Conversation = {
-    id: `conv-${Date.now()}`,
-    title,
-    lastMessage: "Conversation started",
-    languages: "Hindi + English",
-    status: "Running",
-    time: "Just now",
-    messages: [],
-  };
-  // In-memory update for mock runtime
-  mockConversations.unshift(newConversation);
-  return Promise.resolve(newConversation);
+  try {
+    const data = await apiClient.post<Conversation>("/api/conversations", { title });
+    // Save new conversation ID to localStorage and update voiceManager
+    if (data?.id && typeof window !== "undefined") {
+      voiceManager.setConversationId(data.id);
+    }
+    return data;
+  } catch (err) {
+    console.error("[ConversationService] Failed to create conversation:", err);
+    const fallbackId = `conv-${Date.now()}`;
+    if (typeof window !== "undefined") {
+      voiceManager.setConversationId(fallbackId);
+    }
+    return {
+      id: fallbackId,
+      title,
+      lastMessage: "Conversation started",
+      languages: "English",
+      status: "Running",
+      time: "Just now",
+      messages: [],
+    };
+  }
 }
 
 /**
- * Adds a new message to a conversation.
- * Future: POST /conversations/:id/messages
+ * Adds a new message to a conversation and receives the response.
  */
 export async function sendMessage(
   conversationId: string,
   content: string,
   language = "Hindi + English"
 ): Promise<Message> {
-  const message: Message = {
-    id: `msg-${Date.now()}`,
-    role: "user",
-    content,
-    language,
-    timestamp: new Date().toISOString(),
-  };
-
-  const conv = mockConversations.find((c) => c.id === conversationId);
-  if (conv) {
-    conv.messages = conv.messages ?? [];
-    conv.messages.push(message);
-    conv.lastMessage = content;
+  try {
+    const data = await apiClient.post<Message>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+      { content, language }
+    );
+    return data;
+  } catch (err) {
+    console.error(`[ConversationService] Failed to send message to ${conversationId}:`, err);
+    return {
+      id: `msg-${Date.now()}`,
+      role: "user",
+      content,
+      language,
+      timestamp: new Date().toISOString(),
+    };
   }
-
-  return Promise.resolve(message);
 }

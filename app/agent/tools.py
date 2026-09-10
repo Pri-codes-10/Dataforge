@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 import httpx
 
 from app.core.config import settings
-from app.agent.state import conversation_state
+from app.agent.state import ConversationState, conversation_state as default_state
 
 logger = logging.getLogger("sutra.tools")
 
@@ -45,6 +45,43 @@ def resolve_iata(city_name: str, default: str = "CCU") -> str:
     return default
 
 
+def resolve_departure_date(date_str: str) -> str:
+    """Resolve natural language date into YYYY-MM-DD for flight APIs."""
+    import datetime
+    today = datetime.date.today()
+    if not date_str:
+        return (today + datetime.timedelta(days=1)).isoformat()
+
+    clean = date_str.strip().lower()
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", clean):
+        return clean
+
+    if "tomorrow" in clean or "kal" in clean or "agami" in clean:
+        return (today + datetime.timedelta(days=1)).isoformat()
+    if "day after" in clean or "parso" in clean:
+        return (today + datetime.timedelta(days=2)).isoformat()
+    if "today" in clean or "aaj" in clean:
+        return today.isoformat()
+
+    weekdays = {
+        "monday": 0, "somvar": 0, "sombar": 0,
+        "tuesday": 1, "mangalvar": 1, "mangalbar": 1,
+        "wednesday": 2, "budhvar": 2, "budhbar": 2,
+        "thursday": 3, "guruvar": 3, "brihaspativar": 3,
+        "friday": 4, "shukravar": 4, "shukrobar": 4,
+        "saturday": 5, "shanivar": 5, "shonibar": 5,
+        "sunday": 6, "ravivar": 6, "robibar": 6,
+    }
+    for w_name, w_idx in weekdays.items():
+        if w_name in clean:
+            days_ahead = (w_idx - today.weekday()) % 7
+            if days_ahead == 0:
+                days_ahead = 7
+            return (today + datetime.timedelta(days=days_ahead)).isoformat()
+
+    return (today + datetime.timedelta(days=1)).isoformat()
+
+
 async def search_flights(
     origin: str = "",
     destination: str = "",
@@ -53,7 +90,7 @@ async def search_flights(
     **kwargs,
 ) -> Dict[str, Any]:
     """
-    Search real flights using Aviationstack API.
+    Search real flights using configured flight provider (Duffel API or Aviationstack).
     Does NOT return synthetic or fake flight data.
     """
     api_key = settings.FLIGHT_API_KEY
@@ -63,13 +100,100 @@ async def search_flights(
             "success": False,
             "tool": "search_flights",
             "error": "FLIGHT_API_KEY_NOT_CONFIGURED",
-            "message": "Flight search API key is not configured. Please add FLIGHT_API_KEY to your environment.",
-            "result": "Sorry, flight search is unavailable right now because the flight API key is not configured.",
+            "message": "Flight search API key is not configured.",
+            "result": "I can help you plan the flight search, but live flight availability isn't connected right now.",
         }
 
     dep_iata = resolve_iata(origin, "CCU")
     arr_iata = resolve_iata(destination, "DEL")
+    dep_date = resolve_departure_date(date)
 
+    # 1. DUFFEL API (Supported provider)
+    if api_key.startswith("duffel_"):
+        url = "https://api.duffel.com/air/offer_requests?return_offers=true"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Duffel-Version": "v2",
+            "Content-Type": "application/json",
+        }
+        body = {
+            "data": {
+                "slices": [
+                    {
+                        "origin": dep_iata,
+                        "destination": arr_iata,
+                        "departure_date": dep_date,
+                    }
+                ],
+                "passengers": [{"type": "adult"}],
+                "cabin_class": "economy",
+            }
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(url, headers=headers, json=body)
+                resp.raise_for_status()
+                data = resp.json()
+                offers = data.get("data", {}).get("offers", [])
+                if not offers:
+                    return {
+                        "success": True,
+                        "tool": "search_flights",
+                        "origin": dep_iata,
+                        "destination": arr_iata,
+                        "date": dep_date,
+                        "result": f"No flight offers found between {dep_iata} and {arr_iata} for {dep_date}.",
+                    }
+
+                try:
+                    offers.sort(key=lambda o: float(o.get("total_amount", 999999)))
+                except Exception:
+                    pass
+
+                summaries = []
+                for o in offers[:3]:
+                    airline = o.get("owner", {}).get("name", "Airline")
+                    price = o.get("total_amount", "")
+                    currency = o.get("total_currency", "")
+                    slices = o.get("slices", [])
+                    dep_time = ""
+                    flight_num = ""
+                    if slices:
+                        segments = slices[0].get("segments", [])
+                        if segments:
+                            seg = segments[0]
+                            dep_time = (seg.get("departing_at") or "")[11:16]
+                            flight_num = seg.get("marketing_carrier_flight_number") or ""
+
+                    flight_str = f"{airline}"
+                    if flight_num:
+                        flight_str += f" {flight_num}"
+                    if dep_time:
+                        flight_str += f" at {dep_time}"
+                    if price and currency:
+                        flight_str += f" for {currency} {price}"
+                    summaries.append(flight_str)
+
+                flight_text = "; ".join(summaries)
+                return {
+                    "success": True,
+                    "tool": "search_flights",
+                    "origin": dep_iata,
+                    "destination": arr_iata,
+                    "date": dep_date,
+                    "flights_count": len(offers),
+                    "result": f"Found flights from {dep_iata} to {arr_iata} for {dep_date}: {flight_text}.",
+                }
+        except Exception as exc:
+            logger.error(f"[Flight API - Duffel] Error querying flights: {exc}")
+            return {
+                "success": False,
+                "tool": "search_flights",
+                "error": str(exc),
+                "result": "I can help you plan the flight search, but live flight availability isn't connected right now.",
+            }
+
+    # 2. AVIATIONSTACK API (Secondary provider)
     url = "http://api.aviationstack.com/v1/flights"
     params = {
         "access_key": api_key,
@@ -86,13 +210,12 @@ async def search_flights(
 
             if "error" in data:
                 err_info = data["error"].get("message") or str(data["error"])
-                logger.error(f"[Flight API] Provider error: {err_info}")
+                logger.error(f"[Flight API - Aviationstack] Provider error: {err_info}")
                 return {
                     "success": False,
                     "tool": "search_flights",
                     "error": err_info,
-                    "message": "Flight service returned an error.",
-                    "result": "Sorry, the flight service returned an error. Please try again later.",
+                    "result": "I can help you plan the flight search, but live flight availability isn't connected right now.",
                 }
 
             flights = data.get("data", [])
@@ -100,10 +223,10 @@ async def search_flights(
                 return {
                     "success": True,
                     "tool": "search_flights",
-                    "origin": origin or dep_iata,
-                    "destination": destination or arr_iata,
-                    "date": date or "today",
-                    "result": f"No active flights found between {dep_iata} and {arr_iata} for {date or 'the requested date'}.",
+                    "origin": dep_iata,
+                    "destination": arr_iata,
+                    "date": dep_date,
+                    "result": f"No active flights found between {dep_iata} and {arr_iata} for {dep_date}.",
                 }
 
             summaries = []
@@ -118,9 +241,9 @@ async def search_flights(
             return {
                 "success": True,
                 "tool": "search_flights",
-                "origin": origin or dep_iata,
-                "destination": destination or arr_iata,
-                "date": date,
+                "origin": dep_iata,
+                "destination": arr_iata,
+                "date": dep_date,
                 "flights_count": len(flights),
                 "result": f"Found flights from {dep_iata} to {arr_iata}: {flight_text}.",
             }
@@ -130,7 +253,7 @@ async def search_flights(
             "success": False,
             "tool": "search_flights",
             "error": str(exc),
-            "result": "Sorry, flight search is currently unavailable.",
+            "result": "I can help you plan the flight search, but live flight availability isn't connected right now.",
         }
 
 
@@ -243,20 +366,22 @@ async def execute_tool(
     arguments: Dict[str, Any],
     task_id: Optional[str] = None,
     task_version: Optional[int] = None,
+    state: Optional[ConversationState] = None,
 ) -> Dict[str, Any]:
     """
     Execute a tool while protecting conversation state from stale results.
     """
+    active_state = state or default_state
     tool = TOOLS.get(tool_name, search_information)
 
-    current_id = task_id or conversation_state.active_task_id or conversation_state.start_task()
-    current_ver = task_version if task_version is not None else conversation_state.task_version
+    current_id = task_id or active_state.active_task_id or active_state.start_task()
+    current_ver = task_version if task_version is not None else active_state.task_version
 
     try:
         result = await tool(**arguments)
 
-        # Check whether the user changed the task while this tool was running
-        if not conversation_state.is_task_current(current_id, current_ver):
+        # Check whether the task changed while this tool was running
+        if not active_state.is_task_current(current_id, current_ver):
             return {
                 "success": False,
                 "stale": True,
@@ -270,7 +395,7 @@ async def execute_tool(
 
         # Record tool result in conversation state
         if result.get("result"):
-            conversation_state.add_tool_result(tool_name, result["result"])
+            active_state.add_tool_result(tool_name, result["result"])
 
         return result
 

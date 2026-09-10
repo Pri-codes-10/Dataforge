@@ -1,7 +1,8 @@
 import httpx
+from typing import Dict, List, Optional
 
 from app.core.config import settings
-from app.agent.state import conversation_state
+from app.agent.state import ConversationState, conversation_state as default_state
 
 
 class VoiceAgent:
@@ -35,18 +36,16 @@ class VoiceAgent:
         user_text: str,
         language: str = "en",
         tool_result: str = "",
+        state: Optional[ConversationState] = None,
+        messages_history: Optional[List[Dict[str, str]]] = None,
     ) -> str:
         """
-        Generate a spoken response using current conversation state and real tool results.
+        Generate a spoken response using conversation state and real tool results.
         """
-        # Store the latest user message
-        conversation_state.add_message(
-            role="user",
-            content=user_text,
-        )
+        active_state = state or default_state
 
         # Update language information
-        conversation_state.update_language(
+        active_state.update_language(
             language=language,
             is_code_switched=(language == "mixed"),
         )
@@ -56,10 +55,6 @@ class VoiceAgent:
         if not api_key:
             assistant_text = (
                 f"I heard you: '{user_text}'. Note: Please set SARVAM_API_KEY in your .env file."
-            )
-            conversation_state.add_message(
-                role="assistant",
-                content=assistant_text,
             )
             return assistant_text
 
@@ -76,12 +71,15 @@ class VoiceAgent:
         messages = [
             {
                 "role": "system",
-                "content": self._system_prompt(language, tool_result),
+                "content": self._system_prompt(language, tool_result, active_state),
             }
         ]
 
-        # Include conversation history
-        messages.extend(conversation_state.get_messages())
+        # Include conversation history (passed explicitly or from active state)
+        if messages_history is not None:
+            messages.extend(messages_history)
+        else:
+            messages.extend(active_state.get_messages())
 
         try:
             response = await self.client.post(
@@ -92,7 +90,7 @@ class VoiceAgent:
                     "temperature": 0.4,
                     "reasoning_effort": None,
                 },
-                timeout=25.0,
+                timeout=15.0,
             )
             response.raise_for_status()
             response_data = response.json()
@@ -102,7 +100,7 @@ class VoiceAgent:
             ).strip()
         except Exception:
             # Natural conversational fallback based on language and constraints
-            constraints_str = ", ".join(f"{k}: {v}" for k, v in conversation_state.constraints.items()) or "your request"
+            constraints_str = ", ".join(f"{k}: {v}" for k, v in active_state.constraints.items()) or "your request"
             if tool_result:
                 if language in ["hi", "mixed"]:
                     assistant_text = f"Theek hai, information mil gayi: {tool_result[:100]}."
@@ -118,16 +116,11 @@ class VoiceAgent:
                 else:
                     assistant_text = f"Got it, I've updated your request for {constraints_str}."
 
-        # Store assistant response
-        conversation_state.add_message(
-            role="assistant",
-            content=assistant_text,
-        )
-
         return assistant_text
 
-    def _system_prompt(self, language: str, tool_result: str = "") -> str:
-        constraints_desc = ", ".join(f"{k}='{v}'" for k, v in conversation_state.constraints.items()) or "None"
+    def _system_prompt(self, language: str, tool_result: str = "", state: Optional[ConversationState] = None) -> str:
+        active_state = state or default_state
+        constraints_desc = ", ".join(f"{k}='{v}'" for k, v in active_state.constraints.items()) or "None"
         tool_desc = f"Latest Real Tool Result: {tool_result}" if tool_result else "No external tool required or executed."
 
         lang_instruction = {

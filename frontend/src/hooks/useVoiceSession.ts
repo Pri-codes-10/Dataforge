@@ -15,6 +15,7 @@ import {
   startVoiceSession,
   stopVoiceSession,
   sendInterruption,
+  resetVoiceSession,
 } from "@/services/voiceService";
 
 export { demoVoiceStates };
@@ -41,6 +42,20 @@ export function useVoiceSession(initialState: VoiceState = "IDLE") {
       },
       onResponse: (text) => {
         setLastResponse(text);
+      },
+      onResetComplete: () => {
+        setLastTranscript("");
+        setLastResponse("");
+        setVoiceState("IDLE");
+        setIsSessionActive(false);
+      },
+      onPipelineEvent: (ev) => {
+        if (ev.event === "SESSION_RESET") {
+          setLastTranscript("");
+          setLastResponse("");
+          setVoiceState("IDLE");
+          setIsSessionActive(false);
+        }
       },
       onError: (msg) => {
         setErrorMessage(msg);
@@ -90,6 +105,14 @@ export function useVoiceSession(initialState: VoiceState = "IDLE") {
     setIsSessionActive(false);
   }, []);
 
+  const reset = useCallback(async () => {
+    await resetVoiceSession();
+    setLastTranscript("");
+    setLastResponse("");
+    setVoiceState("IDLE");
+    setIsSessionActive(false);
+  }, []);
+
   const toggleRecording = useCallback(async () => {
     if (voiceManager.isConversationActive) {
       await stopVoiceSession();
@@ -126,6 +149,7 @@ export function useVoiceSession(initialState: VoiceState = "IDLE") {
     cycleNextState,
     start,
     stop,
+    reset,
     toggleRecording,
     startConversation: start,
     endConversation: stop,
